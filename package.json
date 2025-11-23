@@ -1,11 +1,11 @@
-
 {
-  "name": "discord-mc-mod-bot",
+  "name": "minecraft-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "license": "MIT",
+  "type": "module",
   "dependencies": {
-    "discord.js": "^14.0.0",
-    "ssh2-sftp-client": "^9.0.0"
+    "discord.js": "^14.15.2",
+    "node-ssh": "^13.1.0",
+    "dotenv": "^16.4.5"
   }
 }
