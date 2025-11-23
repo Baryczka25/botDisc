@@ -36,11 +36,19 @@ client.on("interactionCreate", async interaction => {
             password: process.env.SFTP_PASS
         });
 
-        const result = await ssh.execCommand("ls mods");
+        const modsPath = process.env.MODS_PATH || "mods";
+        const result = await ssh.execCommand(`ls -1 ${modsPath}`);
 
+        if (result.stderr) {
+            return interaction.editReply(
+                `❌ Erro ao listar mods:\n\n\`\`\`\n${result.stderr}\n\`\`\``
+            );
+        }
+
+        const list = result.stdout && result.stdout.trim() ? result.stdout : "Nenhum mod encontrado";
         return interaction.editReply(
             "📦 **Mods instalados:**\n```\n" +
-            (result.stdout || "Nenhum mod encontrado") +
+            list +
             "\n```"
         );
     }
@@ -140,12 +148,18 @@ client.on("interactionCreate", async interaction => {
             password: process.env.SFTP_PASS
         });
 
-        const mods = await ssh.execCommand("ls mods");
+        const modsPath = process.env.MODS_PATH || "mods";
+        const mods = await ssh.execCommand(`ls -1 ${modsPath}`);
 
+        if (mods.stderr) {
+            return interaction.editReply(`❌ Erro ao obter informações:\n\n\`\`\`\n${mods.stderr}\n\`\`\``);
+        }
+
+        const list = mods.stdout && mods.stdout.trim() ? mods.stdout : "Nenhum mod";
         return interaction.editReply(
             "**ℹ️ STATUS DO SERVIDOR**\n\n" +
             "📁 **Mods instalados:**\n```\n" +
-            (mods.stdout || "Nenhum mod") +
+            list +
             "\n```"
         );
     }
