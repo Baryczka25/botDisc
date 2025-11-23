@@ -10,6 +10,7 @@ SFTP_PORT=2022
 SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
 SFTP_MODS_PATH=/home/minecraft/mgt/mods
+RESTART_CMD=sudo systemctl restart minecraft
 
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
