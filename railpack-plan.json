@@ -4,9 +4,7 @@
     "builder": "node",
     "input": ".",
     "output": ".",
-    "install": [
-      "npm install"
-    ],
+    "install": ["npm install"],
     "start": "npm start"
   },
   "env": {
