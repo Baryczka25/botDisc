@@ -7,14 +7,17 @@ import os from "os";
 import dotenv from "dotenv";
 dotenv.config();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const ssh = new NodeSSH();
+// const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// const ssh = new NodeSSH();
+
+let Client = require('ssh2-sftp-client');
+let sftp = new Client();
 
 // ======================= HELPERS =======================
 
 async function ensureSSHConnection() {
-    if (!ssh.isConnected()) {
-        await ssh.connect({
+    if (!sftp.isConnected()) {
+        await sftp.connect({
             host: process.env.SFTP_HOST,
             port: Number(process.env.SFTP_PORT) || 22,
             username: process.env.SFTP_USER,
@@ -30,7 +33,7 @@ async function listMods() {
     await ensureSSHConnection();
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     try {
-        const sftp = await ssh.requestSFTP();
+        await sftp.requestSFTP();
         return new Promise((resolve) => {
             sftp.readdir(modsPath, (err, list) => {
                 if (err) {
@@ -58,7 +61,7 @@ async function uploadMod(file) {
 
     await ensureSSHConnection();
     try {
-        await ssh.putFile(tempPath, `${modsPath}/${file.name}`);
+        await sftp.putFile(tempPath, `${modsPath}/${file.name}`);
     } catch (err) {
         throw new Error(`Falha ao enviar o mod: ${err.message}`);
     }
@@ -71,7 +74,7 @@ async function removeMod(filename) {
 
     await ensureSSHConnection();
     try {
-        const sftp = await ssh.requestSFTP();
+        await sftp.requestSFTP();
         return new Promise((resolve, reject) => {
             sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
                 if (err) {
