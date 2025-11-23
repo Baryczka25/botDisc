@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "main": "index.js",
   "type": "module",
+  "dependencies": {
+    "discord.js": "^14.15.2",
+    "node-ssh": "^13.1.0",
+    "dotenv": "^16.4.5"
+  },
   "scripts": {
     "start": "node index.js",
     "deploy": "node deploy-commands.js"
-  },
+  }
+}
   "dependencies": {
     "discord.js": "^14.15.2",
     "node-ssh": "^13.1.0",
