@@ -1,4 +1,6 @@
-import { Client, GatewayIntentBits, InteractionResponseFlags } from "discord.js";
+import pkg from "discord.js";
+const { Client, GatewayIntentBits } = pkg;
+
 import { NodeSSH } from "node-ssh";
 import fs from "fs";
 import os from "os";
@@ -145,7 +147,7 @@ client.on("interactionCreate", async interaction => {
                         "• `/restart` — Reiniciar servidor\n" +
                         "• `/info` — Informações gerais\n" +
                         "• `/help` — Ajuda",
-                    flags: InteractionResponseFlags.Ephemeral
+                    ephemeral: true // mantém funcionalidade efêmera
                 });
 
             default:
@@ -159,3 +161,4 @@ client.on("interactionCreate", async interaction => {
 
 // ======================= LOGIN =======================
 client.login(process.env.DISCORD_TOKEN);
+console.log("🤖 Bot iniciado...");
