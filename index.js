@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits } from "discord.js";
+import { Client, GatewayIntentBits, InteractionResponseFlags } from "discord.js";
 import { NodeSSH } from "node-ssh";
 import fs from "fs";
 import os from "os";
@@ -17,34 +17,33 @@ async function ensureSSHConnection() {
             port: Number(process.env.SFTP_PORT) || 22,
             username: process.env.SFTP_USER,
             password: process.env.SFTP_PASS,
-            hostVerifier: (hash) => {
-                console.log("Fingerprint do host:", hash);
-                return true;
-            }
+            hostVerifier: () => true, // aceita a chave do host automaticamente
         });
+        console.log("✅ Conectado ao servidor via SSH!");
     }
 }
 
-// Lista mods com tratamento de erros
+// Lista mods com tratamento de erro "failure"
 async function listMods() {
     await ensureSSHConnection();
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
-    const sftp = await ssh.requestSFTP();
-
-    return new Promise((resolve) => {
-        sftp.readdir(modsPath, (err, list) => {
-            if (err) {
-                console.error("Erro ao listar mods:", err.message);
-                return resolve(`❌ Não foi possível listar os mods: ${err.message}`);
-            }
-            if (!list || list.length === 0) return resolve("Nenhum mod encontrado");
-
-            const filenames = list
-                .map(f => f.filename)
-                .filter(name => name && name.trim() !== "");
-            resolve(filenames.join("\n") || "Nenhum mod encontrado");
+    try {
+        const sftp = await ssh.requestSFTP();
+        return new Promise((resolve) => {
+            sftp.readdir(modsPath, (err, list) => {
+                if (err) {
+                    console.error("Erro ao listar mods:", err.message);
+                    return resolve(`❌ Não foi possível listar os mods: ${err.message}`);
+                }
+                if (!list || list.length === 0) return resolve("Nenhum mod encontrado");
+                const filenames = list.map(f => f.filename).filter(n => n && n.trim() !== "");
+                resolve(filenames.join("\n") || "Nenhum mod encontrado");
+            });
         });
-    });
+    } catch (err) {
+        console.error("Erro ao acessar SFTP:", err.message);
+        return `❌ Não foi possível acessar o servidor: ${err.message}`;
+    }
 }
 
 // Upload de mod
@@ -63,23 +62,26 @@ async function uploadMod(file) {
     }
 }
 
-// Remove mod com tratamento de erros
+// Remove mod
 async function removeMod(filename) {
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
 
     await ensureSSHConnection();
-    const sftp = await ssh.requestSFTP();
-
-    return new Promise((resolve, reject) => {
-        sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
-            if (err) {
-                console.error(`Erro ao remover ${sanitized}:`, err.message);
-                return reject(new Error(`Não foi possível remover ${sanitized}: ${err.message}`));
-            }
-            resolve(sanitized);
+    try {
+        const sftp = await ssh.requestSFTP();
+        return new Promise((resolve, reject) => {
+            sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
+                if (err) {
+                    console.error(`Erro ao remover ${sanitized}:`, err.message);
+                    return reject(new Error(`Não foi possível remover ${sanitized}: ${err.message}`));
+                }
+                resolve(sanitized);
+            });
         });
-    });
+    } catch (err) {
+        throw new Error(`Erro ao acessar SFTP: ${err.message}`);
+    }
 }
 
 // Reinicia servidor via script
@@ -143,7 +145,7 @@ client.on("interactionCreate", async interaction => {
                         "• `/restart` — Reiniciar servidor\n" +
                         "• `/info` — Informações gerais\n" +
                         "• `/help` — Ajuda",
-                    ephemeral: true
+                    flags: InteractionResponseFlags.Ephemeral
                 });
 
             default:
