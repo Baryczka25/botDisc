@@ -15,6 +15,4 @@ SFTP_REMOTE_DIR=/home/minecraft/mgt/mods
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
 PTERO_API_KEY=ptlc_uipqzETArb7e0atTJXIrvyTvu6gC0YtfZCMOsku7wQT
 PTERO_SERVER_ID=enx-cirion-95.enx.host:10130
-PTERO_API_KEY=
-PTERO_SERVER_ID=
 
