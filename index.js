@@ -8,15 +8,13 @@ dotenv.config();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const ssh = new NodeSSH();
 
-client.once("ready", () => console.log("Bot online!"));
+// ======================= HELPERS =======================
 
-// ======================= FUNÇÕES HELPERS =======================
-
-// Garante que o bot esteja conectado via SSH
+// Garante conexão SSH ativa
 async function ensureSSHConnection() {
     if (!ssh.isConnected()) {
         await ssh.connect({
-            host: process.env.SFTP_HOST, // apenas o host puro, sem sftp://
+            host: process.env.SFTP_HOST,
             port: Number(process.env.SFTP_PORT) || 22,
             username: process.env.SFTP_USER,
             password: process.env.SFTP_PASS
@@ -24,27 +22,44 @@ async function ensureSSHConnection() {
     }
 }
 
-// Lista mods do servidor
+// Retorna lista de mods
 async function listMods() {
     await ensureSSHConnection();
-    const modsPath = process.env.MODS_PATH || "/home/usuario/minecraft-server/mods"; // caminho absoluto
+    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     const res = await ssh.execCommand(`ls -1 ${modsPath}`);
     if (res.stderr) throw new Error(res.stderr);
     return res.stdout.trim() || "Nenhum mod encontrado";
 }
 
-// Reinicia o servidor
-async function restartServer() {
+// Upload de mod
+async function uploadMod(file) {
+    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+    const tempPath = `${os.tmpdir()}/${file.name}`;
+    const response = await fetch(file.url);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.promises.writeFile(tempPath, buffer);
+
     await ensureSSHConnection();
-    const restartCmd = process.env.RESTART_CMD || "sudo systemctl restart minecraft"; // ajuste conforme seu servidor
-    const res = await ssh.execCommand(restartCmd);
-    if (res.stderr) throw new Error(res.stderr);
-    return "Servidor reiniciado com sucesso!";
+    await ssh.putFile(tempPath, `${modsPath}/${file.name}`);
 }
 
-// Sanitiza nomes de arquivo
-function sanitizeFileName(name) {
-    return name.replace(/[^a-zA-Z0-9._-]/g, "");
+// Remove mod
+async function removeMod(filename) {
+    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+    const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+    await ensureSSHConnection();
+    const res = await ssh.execCommand(`rm ${modsPath}/${sanitized}`);
+    if (res.stderr) throw new Error(res.stderr);
+    return sanitized;
+}
+
+// Reinicia servidor
+async function restartServer() {
+    await ensureSSHConnection();
+    const cmd = process.env.RESTART_CMD || "sudo /home/minecraft/mgt/restart.sh";
+    const res = await ssh.execCommand(cmd);
+    if (res.stderr) throw new Error(res.stderr);
+    return "Servidor reiniciado com sucesso!";
 }
 
 // ======================= HANDLER =======================
@@ -52,91 +67,60 @@ client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     try {
-        const modsPath = process.env.MODS_PATH || "/home/usuario/mgt/mods";
+        switch (interaction.commandName) {
+            case "ping":
+                return interaction.reply("🏓 Pong!");
 
-        // ----------- /PING -----------------
-        if (interaction.commandName === "ping") {
-            return interaction.reply("🏓 Pong!");
+            case "listmods":
+                await interaction.reply("🔍 Listando mods...");
+                const modsList = await listMods();
+                return interaction.editReply(`📦 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
+
+            case "uploadmod":
+                const file = interaction.options.getAttachment("arquivo");
+                if (!file.name.endsWith(".jar")) return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
+                await interaction.reply("📤 Enviando mod...");
+                await uploadMod(file);
+                return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
+
+            case "removemod":
+                const name = interaction.options.getString("nome");
+                await interaction.reply("🗑 Removendo mod...");
+                const removed = await removeMod(name);
+                return interaction.editReply(`✅ Mod **${removed}** removido!`);
+
+            case "restart":
+                await interaction.reply("🔄 Reiniciando servidor...");
+                const msg = await restartServer();
+                return interaction.editReply(`✅ ${msg}`);
+
+            case "info":
+                await interaction.reply("📡 Coletando informações...");
+                const mods = await listMods();
+                return interaction.editReply(`**ℹ️ STATUS DO SERVIDOR**\n\n📁 **Mods instalados:**\n\`\`\`\n${mods}\n\`\`\``);
+
+            case "help":
+                return interaction.reply({
+                    content:
+                        "📘 **Lista de comandos:**\n\n" +
+                        "• `/ping` — Testa o bot\n" +
+                        "• `/listmods` — Lista mods instalados\n" +
+                        "• `/uploadmod` — Enviar mod (.jar)\n" +
+                        "• `/removemod` — Remover mod\n" +
+                        "• `/restart` — Reiniciar servidor\n" +
+                        "• `/info` — Informações gerais\n" +
+                        "• `/help` — Ajuda",
+                    ephemeral: true
+                });
+
+            default:
+                return interaction.reply("❌ Comando desconhecido.");
         }
-
-        // ----------- /LISTMODS --------------
-        if (interaction.commandName === "listmods") {
-            await interaction.reply("🔍 Listando mods...");
-            const modsList = await listMods();
-            return interaction.editReply(`📦 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
-        }
-
-        // ----------- /UPLOADMOD -------------
-        if (interaction.commandName === "uploadmod") {
-            const arquivo = interaction.options.getAttachment("arquivo");
-
-            if (!arquivo.name.endsWith(".jar")) {
-                return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
-            }
-
-            await interaction.reply("📤 Enviando mod para o servidor...");
-
-            const tempPath = `${os.tmpdir()}/${arquivo.name}`;
-            const response = await fetch(arquivo.url);
-            const buffer = Buffer.from(await response.arrayBuffer());
-            await fs.promises.writeFile(tempPath, buffer);
-
-            await ensureSSHConnection();
-            await ssh.putFile(tempPath, `${modsPath}/${arquivo.name}`);
-
-            return interaction.editReply(`✅ Mod **${arquivo.name}** enviado com sucesso!`);
-        }
-
-        // ----------- /REMOVEMOD -------------
-        if (interaction.commandName === "removemod") {
-            const nome = sanitizeFileName(interaction.options.getString("nome"));
-            await interaction.reply("🗑 Removendo mod...");
-
-            await ensureSSHConnection();
-            const result = await ssh.execCommand(`rm ${modsPath}/${nome}`);
-
-            if (result.stderr) {
-                return interaction.editReply("❌ Erro ao remover o mod. Verifique o nome.");
-            }
-
-            return interaction.editReply(`✅ Mod **${nome}** removido!`);
-        }
-
-        // ----------- /RESTART ----------------
-        if (interaction.commandName === "restart") {
-            await interaction.reply("🔄 Reiniciando o servidor...");
-            const message = await restartServer();
-            return interaction.editReply(`✅ ${message}`);
-        }
-
-        // ----------- /HELP -------------------
-        if (interaction.commandName === "help") {
-            return interaction.reply({
-                content:
-                    "📘 **Lista de comandos:**\n\n" +
-                    "• `/ping` — Testa o bot\n" +
-                    "• `/listmods` — Lista mods instalados\n" +
-                    "• `/uploadmod` — Enviar mod (.jar)\n" +
-                    "• `/removemod` — Remover mod\n" +
-                    "• `/restart` — Reiniciar servidor\n" +
-                    "• `/info` — Informações gerais\n" +
-                    "• `/help` — Ajuda",
-                ephemeral: true
-            });
-        }
-
-        // ----------- /INFO -------------------
-        if (interaction.commandName === "info") {
-            await interaction.reply("📡 Coletando informações...");
-            const modsList = await listMods();
-            return interaction.editReply(`**ℹ️ STATUS DO SERVIDOR**\n\n📁 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
-        }
-
     } catch (err) {
         console.error(err);
         return interaction.editReply(`❌ Ocorreu um erro:\n\`\`\`\n${err.message}\n\`\`\``);
     }
 });
 
-// ======================= LOGIN DO BOT =======================
+// ======================= LOGIN =======================
 client.login(process.env.DISCORD_TOKEN);
