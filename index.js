@@ -52,7 +52,7 @@ client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     try {
-        const modsPath = process.env.MODS_PATH || "/home/usuario/minecraft-server/mods";
+        const modsPath = process.env.MODS_PATH || "/home/usuario/mgt/mods";
 
         // ----------- /PING -----------------
         if (interaction.commandName === "ping") {
