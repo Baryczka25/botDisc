@@ -1,167 +1,138 @@
+// index.js
 import pkg from "discord.js";
-const { Client, GatewayIntentBits } = pkg;
+const { Client, GatewayIntentBits, AttachmentBuilder } = pkg;
 
-import { NodeSSH } from "node-ssh";
+import SFTPClient from "ssh2-sftp-client";
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
 dotenv.config();
 
-// const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-// const ssh = new NodeSSH();
-
-let Client = require('ssh2-sftp-client');
-let sftp = new Client();
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const sftp = new SFTPClient();
 
 // ======================= HELPERS =======================
 
-async function ensureSSHConnection() {
-    if (!sftp.isConnected()) {
-        await sftp.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT) || 22,
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS,
-            hostVerifier: () => true, // aceita a chave do host automaticamente
-        });
-        console.log("✅ Conectado ao servidor via SSH!");
-    }
+// Conecta no servidor SFTP
+async function ensureSFTP() {
+  if (!sftp.sftp) {
+    await sftp.connect({
+      host: process.env.SFTP_HOST,
+      port: Number(process.env.SFTP_PORT) || 22,
+      username: process.env.SFTP_USER,
+      password: process.env.SFTP_PASS,
+      hostVerifier: () => true, // aceita qualquer fingerprint
+    });
+    console.log("✅ Conectado ao servidor via SFTP!");
+  }
 }
 
-// Lista mods com tratamento de erro "failure"
+// Lista mods
 async function listMods() {
-    await ensureSSHConnection();
-    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
-    try {
-        await sftp.requestSFTP();
-        return new Promise((resolve) => {
-            sftp.readdir(modsPath, (err, list) => {
-                if (err) {
-                    console.error("Erro ao listar mods:", err.message);
-                    return resolve(`❌ Não foi possível listar os mods: ${err.message}`);
-                }
-                if (!list || list.length === 0) return resolve("Nenhum mod encontrado");
-                const filenames = list.map(f => f.filename).filter(n => n && n.trim() !== "");
-                resolve(filenames.join("\n") || "Nenhum mod encontrado");
-            });
-        });
-    } catch (err) {
-        console.error("Erro ao acessar SFTP:", err.message);
-        return `❌ Não foi possível acessar o servidor: ${err.message}`;
-    }
+  await ensureSFTP();
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  try {
+    const files = await sftp.list(modsPath);
+    if (!files || files.length === 0) return "Nenhum mod encontrado";
+    return files.map(f => f.name).join("\n");
+  } catch (err) {
+    console.error("Erro ao listar mods:", err.message);
+    return `❌ Não foi possível listar os mods: ${err.message}`;
+  }
 }
 
 // Upload de mod
 async function uploadMod(file) {
-    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
-    const tempPath = `${os.tmpdir()}/${file.name}`;
-    const response = await fetch(file.url);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.promises.writeFile(tempPath, buffer);
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  const tempPath = `${os.tmpdir()}/${file.name}`;
+  const response = await fetch(file.url);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await fs.promises.writeFile(tempPath, buffer);
 
-    await ensureSSHConnection();
-    try {
-        await sftp.putFile(tempPath, `${modsPath}/${file.name}`);
-    } catch (err) {
-        throw new Error(`Falha ao enviar o mod: ${err.message}`);
-    }
+  await ensureSFTP();
+  try {
+    await sftp.put(tempPath, `${modsPath}/${file.name}`);
+  } catch (err) {
+    throw new Error(`Falha ao enviar o mod: ${err.message}`);
+  }
 }
 
 // Remove mod
 async function removeMod(filename) {
-    const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
-    const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
 
-    await ensureSSHConnection();
-    try {
-        await sftp.requestSFTP();
-        return new Promise((resolve, reject) => {
-            sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
-                if (err) {
-                    console.error(`Erro ao remover ${sanitized}:`, err.message);
-                    return reject(new Error(`Não foi possível remover ${sanitized}: ${err.message}`));
-                }
-                resolve(sanitized);
-            });
-        });
-    } catch (err) {
-        throw new Error(`Erro ao acessar SFTP: ${err.message}`);
-    }
-}
-
-// Reinicia servidor via script
-async function restartServer() {
-    const cmd = process.env.RESTART_CMD || "/home/minecraft/mgt/restart.sh";
-    await ensureSSHConnection();
-    const res = await ssh.execCommand(cmd);
-    if (res.stderr) throw new Error(res.stderr);
-    return "Servidor reiniciado com sucesso!";
+  await ensureSFTP();
+  try {
+    await sftp.delete(`${modsPath}/${sanitized}`);
+    return sanitized;
+  } catch (err) {
+    console.error(`Erro ao remover ${sanitized}:`, err.message);
+    throw new Error(`Não foi possível remover ${sanitized}: ${err.message}`);
+  }
 }
 
 // ======================= HANDLER =======================
 client.on("interactionCreate", async interaction => {
-    if (!interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
-    try {
-        switch (interaction.commandName) {
-            case "ping":
-                return interaction.reply("🏓 Pong!");
+  try {
+    switch (interaction.commandName) {
+      case "ping":
+        return interaction.reply("🏓 Pong!");
 
-            case "listmods":
-                await interaction.reply("🔍 Listando mods...");
-                const modsList = await listMods();
-                return interaction.editReply(`📦 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
+      case "listmods":
+        await interaction.reply("🔍 Listando mods...");
+        const modsList = await listMods();
+        return interaction.editReply(`📦 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
 
-            case "uploadmod":
-                const file = interaction.options.getAttachment("arquivo");
-                if (!file.name.endsWith(".jar")) return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
-                await interaction.reply("📤 Enviando mod...");
-                await uploadMod(file);
-                return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
+      case "uploadmod":
+        const file = interaction.options.getAttachment("arquivo");
+        if (!file.name.endsWith(".jar"))
+          return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
+        await interaction.reply("📤 Enviando mod...");
+        await uploadMod(file);
+        return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
 
-            case "removemod":
-                const name = interaction.options.getString("nome");
-                await interaction.reply("🗑 Removendo mod...");
-                try {
-                    const removed = await removeMod(name);
-                    return interaction.editReply(`✅ Mod **${removed}** removido!`);
-                } catch (err) {
-                    return interaction.editReply(`❌ ${err.message}`);
-                }
-
-            case "restart":
-                await interaction.reply("🔄 Reiniciando servidor...");
-                const msg = await restartServer();
-                return interaction.editReply(`✅ ${msg}`);
-
-            case "info":
-                await interaction.reply("📡 Coletando informações...");
-                const mods = await listMods();
-                return interaction.editReply(`**ℹ️ STATUS DO SERVIDOR**\n\n📁 **Mods instalados:**\n\`\`\`\n${mods}\n\`\`\``);
-
-            case "help":
-                return interaction.reply({
-                    content:
-                        "📘 **Lista de comandos:**\n\n" +
-                        "• `/ping` — Testa o bot\n" +
-                        "• `/listmods` — Lista mods instalados\n" +
-                        "• `/uploadmod` — Enviar mod (.jar)\n" +
-                        "• `/removemod` — Remover mod\n" +
-                        "• `/restart` — Reiniciar servidor\n" +
-                        "• `/info` — Informações gerais\n" +
-                        "• `/help` — Ajuda",
-                    ephemeral: true // mantém funcionalidade efêmera
-                });
-
-            default:
-                return interaction.reply("❌ Comando desconhecido.");
+      case "removemod":
+        const name = interaction.options.getString("nome");
+        await interaction.reply("🗑 Removendo mod...");
+        try {
+          const removed = await removeMod(name);
+          return interaction.editReply(`✅ Mod **${removed}** removido!`);
+        } catch (err) {
+          return interaction.editReply(`❌ ${err.message}`);
         }
-    } catch (err) {
-        console.error(err);
-        return interaction.editReply(`❌ Ocorreu um erro:\n\`\`\`\n${err.message}\n\`\`\``);
+
+      case "info":
+        await interaction.reply("📡 Coletando informações...");
+        const mods = await listMods();
+        return interaction.editReply(
+          `**ℹ️ STATUS DO SERVIDOR**\n\n📁 **Mods instalados:**\n\`\`\`\n${mods}\n\`\`\``
+        );
+
+      case "help":
+        return interaction.reply({
+          content:
+            "📘 **Lista de comandos:**\n\n" +
+            "• `/ping` — Testa o bot\n" +
+            "• `/listmods` — Lista mods instalados\n" +
+            "• `/uploadmod` — Enviar mod (.jar)\n" +
+            "• `/removemod` — Remover mod\n" +
+            "• `/info` — Informações gerais\n" +
+            "• `/help` — Ajuda",
+          ephemeral: true,
+        });
+
+      default:
+        return interaction.reply("❌ Comando desconhecido.");
     }
+  } catch (err) {
+    console.error(err);
+    return interaction.editReply(`❌ Ocorreu um erro:\n\`\`\`\n${err.message}\n\`\`\``);
+  }
 });
 
 // ======================= LOGIN =======================
+client.once("ready", () => console.log("🤖 Bot online!"));
 client.login(process.env.DISCORD_TOKEN);
-console.log("🤖 Bot iniciado...");
