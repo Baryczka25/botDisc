@@ -6,7 +6,7 @@ const TOKEN = "MTQ0MjAxMDIwMzkyMTk3MzM0MA.G9DX4K.JRe-TxIONj-om_fIRTcuYvjFt1UHgBm
 const SFTP_HOST = "enx-cirion-95.enx.host";
 const SFTP_PORT = 2022;
 const SFTP_USER = "dwho4u2a.f75839cd";
-const SFTP_PASS = "enx-cirion-95.enx.host:10130";
+const SFTP_PASS = "moonshine";
 
 const MC_MODS_PATH = "/mods";
 
