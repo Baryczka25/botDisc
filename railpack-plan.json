@@ -1,0 +1,48 @@
+{
+  "name": "minecraft-bot",
+  "build": {
+    "builder": "node",
+    "input": ".",
+    "output": ".",
+    "install": [
+      "npm install"
+    ],
+    "start": "npm start"
+  },
+  "env": {
+    "DISCORD_TOKEN": {
+      "type": "env",
+      "description": "Token do bot Discord"
+    },
+    "SFTP_HOST": {
+      "type": "env",
+      "description": "Host ou IP do servidor SSH"
+    },
+    "SFTP_PORT": {
+      "type": "env",
+      "description": "Porta SSH",
+      "default": "22"
+    },
+    "SFTP_USER": {
+      "type": "env",
+      "description": "Usuário SSH"
+    },
+    "SFTP_PASS": {
+      "type": "env",
+      "description": "Senha SSH"
+    },
+    "MODS_PATH": {
+      "type": "env",
+      "description": "Caminho da pasta de mods",
+      "default": "mods"
+    }
+  },
+  "mounts": [],
+  "secrets": [],
+  "ports": [
+    {
+      "port": 3000,
+      "protocol": "tcp"
+    }
+  ]
+}
