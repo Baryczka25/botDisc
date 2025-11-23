@@ -10,7 +10,6 @@ const ssh = new NodeSSH();
 
 // ======================= HELPERS =======================
 
-// Conecta via SSH se ainda não estiver conectado
 async function ensureSSHConnection() {
     if (!ssh.isConnected()) {
         await ssh.connect({
@@ -18,7 +17,6 @@ async function ensureSSHConnection() {
             port: Number(process.env.SFTP_PORT) || 22,
             username: process.env.SFTP_USER,
             password: process.env.SFTP_PASS,
-            // Aceita a chave do host automaticamente (apenas em ambiente seguro)
             hostVerifier: (hash) => {
                 console.log("Fingerprint do host:", hash);
                 return true;
@@ -27,16 +25,24 @@ async function ensureSSHConnection() {
     }
 }
 
-// Lista mods
+// Lista mods com tratamento de erros
 async function listMods() {
     await ensureSSHConnection();
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     const sftp = await ssh.requestSFTP();
-    return new Promise((resolve, reject) => {
+
+    return new Promise((resolve) => {
         sftp.readdir(modsPath, (err, list) => {
-            if (err) return reject(err);
+            if (err) {
+                console.error("Erro ao listar mods:", err.message);
+                return resolve(`❌ Não foi possível listar os mods: ${err.message}`);
+            }
             if (!list || list.length === 0) return resolve("Nenhum mod encontrado");
-            resolve(list.map(f => f.filename).join("\n"));
+
+            const filenames = list
+                .map(f => f.filename)
+                .filter(name => name && name.trim() !== "");
+            resolve(filenames.join("\n") || "Nenhum mod encontrado");
         });
     });
 }
@@ -48,25 +54,35 @@ async function uploadMod(file) {
     const response = await fetch(file.url);
     const buffer = Buffer.from(await response.arrayBuffer());
     await fs.promises.writeFile(tempPath, buffer);
+
     await ensureSSHConnection();
-    await ssh.putFile(tempPath, `${modsPath}/${file.name}`);
+    try {
+        await ssh.putFile(tempPath, `${modsPath}/${file.name}`);
+    } catch (err) {
+        throw new Error(`Falha ao enviar o mod: ${err.message}`);
+    }
 }
 
-// Remove mod
+// Remove mod com tratamento de erros
 async function removeMod(filename) {
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+
     await ensureSSHConnection();
     const sftp = await ssh.requestSFTP();
+
     return new Promise((resolve, reject) => {
         sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
-            if (err) return reject(err);
+            if (err) {
+                console.error(`Erro ao remover ${sanitized}:`, err.message);
+                return reject(new Error(`Não foi possível remover ${sanitized}: ${err.message}`));
+            }
             resolve(sanitized);
         });
     });
 }
 
-// Reinicia servidor via script (não pede senha)
+// Reinicia servidor via script
 async function restartServer() {
     const cmd = process.env.RESTART_CMD || "/home/minecraft/mgt/restart.sh";
     await ensureSSHConnection();
@@ -99,8 +115,12 @@ client.on("interactionCreate", async interaction => {
             case "removemod":
                 const name = interaction.options.getString("nome");
                 await interaction.reply("🗑 Removendo mod...");
-                const removed = await removeMod(name);
-                return interaction.editReply(`✅ Mod **${removed}** removido!`);
+                try {
+                    const removed = await removeMod(name);
+                    return interaction.editReply(`✅ Mod **${removed}** removido!`);
+                } catch (err) {
+                    return interaction.editReply(`❌ ${err.message}`);
+                }
 
             case "restart":
                 await interaction.reply("🔄 Reiniciando servidor...");
