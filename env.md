@@ -5,7 +5,7 @@ CLIENT_ID=1442010203921973340
 
 # SFTP (EnxadaHost)
 SFTP_URI=f75839cd-404d-46bd-b0e9-932e21bd0bd8
-SFTP_HOST=enx-cirion-95.enx.host:2022
+SFTP_HOST=enx-cirion-95.enx.host
 SFTP_PORT=2022
 SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
