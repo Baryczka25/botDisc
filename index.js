@@ -1,10 +1,10 @@
 import {
     Client,
-    GatewayIntentBits,
-    AttachmentBuilder
+    GatewayIntentBits
 } from "discord.js";
 import { NodeSSH } from "node-ssh";
-import fs from "fs";   // <-- NECESSÁRIO PARA UPLOAD
+import fs from "fs";
+import os from "os";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -13,160 +13,142 @@ const ssh = new NodeSSH();
 
 client.once("ready", () => console.log("Bot online!"));
 
-// ============================================================
-// ======================= HANDLER ============================
-// ============================================================
+// ======================= FUNÇÕES HELPERS =======================
+
+// Garante que o bot esteja conectado via SSH
+async function ensureSSHConnection() {
+    if (!ssh.isConnected()) {
+        await ssh.connect({
+            host: process.env.SFTP_HOST,
+            port: Number(process.env.SFTP_PORT),
+            username: process.env.SFTP_USER,
+            password: process.env.SFTP_PASS
+        });
+    }
+}
+
+// Lista mods do servidor
+async function listMods() {
+    await ensureSSHConnection();
+    const path = process.env.MODS_PATH || "mods";
+    const res = await ssh.execCommand(`ls -1 ${path}`);
+    if (res.stderr) throw new Error(res.stderr);
+    return res.stdout.trim() || "Nenhum mod encontrado";
+}
+
+// Sanitiza nomes de arquivo para evitar problemas
+function sanitizeFileName(name) {
+    return name.replace(/[^a-zA-Z0-9._-]/g, "");
+}
+
+// ======================= HANDLER =======================
 
 client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // ----------- COMANDO /PING -----------------
-    if (interaction.commandName === "ping") {
-        return interaction.reply("🏓 Pong!");
-    }
+    try {
 
-    // ----------- COMANDO /LISTMODS --------------
-    if (interaction.commandName === "listmods") {
-        await interaction.reply("🔍 Listando mods...");
+        // ----------- /PING -----------------
+        if (interaction.commandName === "ping") {
+            return interaction.reply("🏓 Pong!");
+        }
 
-        await ssh.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT),
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
-        });
-
-        const modsPath = process.env.MODS_PATH || "mods";
-        const result = await ssh.execCommand(`ls -1 ${modsPath}`);
-
-        if (result.stderr) {
+        // ----------- /LISTMODS --------------
+        if (interaction.commandName === "listmods") {
+            await interaction.reply("🔍 Listando mods...");
+            const modsList = await listMods();
             return interaction.editReply(
-                `❌ Erro ao listar mods:\n\n\`\`\`\n${result.stderr}\n\`\`\``
+                "📦 **Mods instalados:**\n```\n" + modsList + "\n```"
             );
         }
 
-        const list = result.stdout && result.stdout.trim() ? result.stdout : "Nenhum mod encontrado";
-        return interaction.editReply(
-            "📦 **Mods instalados:**\n```\n" +
-            list +
-            "\n```"
-        );
-    }
+        // ----------- /UPLOADMOD -------------
+        if (interaction.commandName === "uploadmod") {
+            const arquivo = interaction.options.getAttachment("arquivo");
 
-    // ----------- COMANDO /UPLOADMOD -------------
-    if (interaction.commandName === "uploadmod") {
-        const arquivo = interaction.options.getAttachment("arquivo");
+            if (!arquivo.name.endsWith(".jar")) {
+                return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
+            }
 
-        if (!arquivo.name.endsWith(".jar")) {
-            return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
+            await interaction.reply("📤 Enviando mod para o servidor...");
+
+            // Baixar arquivo temporariamente
+            const tempPath = `${os.tmpdir()}/${arquivo.name}`;
+            const response = await fetch(arquivo.url);
+            const buffer = Buffer.from(await response.arrayBuffer());
+            await fs.promises.writeFile(tempPath, buffer);
+
+            // Upload para servidor
+            await ensureSSHConnection();
+            const modsPath = process.env.MODS_PATH || "mods";
+            await ssh.putFile(tempPath, `${modsPath}/${arquivo.name}`);
+
+            return interaction.editReply(`✅ Mod **${arquivo.name}** enviado com sucesso!`);
         }
 
-        await interaction.reply("📤 Enviando mod para o servidor...");
+        // ----------- /REMOVEMOD -------------
+        if (interaction.commandName === "removemod") {
+            const nome = interaction.options.getString("nome");
+            const nomeSanitizado = sanitizeFileName(nome);
 
-        // Baixar arquivo do Discord
-        const tempPath = `/tmp/${arquivo.name}`;
-        const response = await fetch(arquivo.url);
-        const buffer = Buffer.from(await response.arrayBuffer());
-        await fs.promises.writeFile(tempPath, buffer);
+            await interaction.reply("🗑 Removendo mod...");
+            await ensureSSHConnection();
 
-        // Conectar no SFTP
-        await ssh.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT),
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
-        });
+            const modsPath = process.env.MODS_PATH || "mods";
+            const result = await ssh.execCommand(`rm ${modsPath}/${nomeSanitizado}`);
 
-        // Enviar arquivo
-        await ssh.putFile(tempPath, `mods/${arquivo.name}`);
+            if (result.stderr) {
+                return interaction.editReply("❌ Erro ao remover o mod. Verifique o nome.");
+            }
 
-        return interaction.editReply(`✅ Mod **${arquivo.name}** enviado com sucesso!`);
-    }
-
-    // ----------- COMANDO /REMOVEMOD -------------
-    if (interaction.commandName === "removemod") {
-        const nome = interaction.options.getString("nome");
-
-        await interaction.reply("🗑 Removendo mod...");
-
-        await ssh.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT),
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
-        });
-
-        const result = await ssh.execCommand(`rm mods/${nome}`);
-
-        if (result.stderr) {
-            return interaction.editReply("❌ Erro ao remover o mod. Verifique o nome.");
+            return interaction.editReply(`✅ Mod **${nomeSanitizado}** removido!`);
         }
 
-        return interaction.editReply(`✅ Mod **${nome}** removido!`);
-    }
+        // ----------- /RESTART ----------------
+        if (interaction.commandName === "restart") {
+            await interaction.reply("🔄 Reiniciando a instância...");
+            await ensureSSHConnection();
 
-    // ----------- COMANDO /RESTART ----------------
-    if (interaction.commandName === "restart") {
-        await interaction.reply("🔄 Reiniciando a instância...");
+            // Ajuste o comando conforme seu servidor
+            await ssh.execCommand("restart");
 
-        await ssh.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT),
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
-        });
-
-        await ssh.execCommand("restart"); // EnxadaHost reinicia 
-
-        return interaction.editReply("✅ Servidor reiniciado!");
-    }
-
-    // ----------- COMANDO /HELP -------------------
-    if (interaction.commandName === "help") {
-        return interaction.reply({
-            content:
-                "📘 **Lista de comandos:**\n\n" +
-                "• `/ping` — Testa o bot\n" +
-                "• `/listmods` — Lista mods instalados\n" +
-                "• `/uploadmod` — Enviar mod (.jar)\n" +
-                "• `/removemod` — Remover mod\n" +
-                "• `/restart` — Reiniciar servidor\n" +
-                "• `/info` — Informações gerais\n" +
-                "• `/help` — Ajuda",
-            ephemeral: true
-        });
-    }
-
-    // ----------- COMANDO /INFO -------------------
-    if (interaction.commandName === "info") {
-        await interaction.reply("📡 Coletando informações...");
-
-        await ssh.connect({
-            host: process.env.SFTP_HOST,
-            port: Number(process.env.SFTP_PORT),
-            username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
-        });
-
-        const modsPath = process.env.MODS_PATH || "mods";
-        const mods = await ssh.execCommand(`ls -1 ${modsPath}`);
-
-        if (mods.stderr) {
-            return interaction.editReply(`❌ Erro ao obter informações:\n\n\`\`\`\n${mods.stderr}\n\`\`\``);
+            return interaction.editReply("✅ Servidor reiniciado!");
         }
 
-        const list = mods.stdout && mods.stdout.trim() ? mods.stdout : "Nenhum mod";
-        return interaction.editReply(
-            "**ℹ️ STATUS DO SERVIDOR**\n\n" +
-            "📁 **Mods instalados:**\n```\n" +
-            list +
-            "\n```"
-        );
+        // ----------- /HELP -------------------
+        if (interaction.commandName === "help") {
+            return interaction.reply({
+                content:
+                    "📘 **Lista de comandos:**\n\n" +
+                    "• `/ping` — Testa o bot\n" +
+                    "• `/listmods` — Lista mods instalados\n" +
+                    "• `/uploadmod` — Enviar mod (.jar)\n" +
+                    "• `/removemod` — Remover mod\n" +
+                    "• `/restart` — Reiniciar servidor\n" +
+                    "• `/info` — Informações gerais\n" +
+                    "• `/help` — Ajuda",
+                ephemeral: true
+            });
+        }
+
+        // ----------- /INFO -------------------
+        if (interaction.commandName === "info") {
+            await interaction.reply("📡 Coletando informações...");
+            const modsList = await listMods();
+
+            return interaction.editReply(
+                "**ℹ️ STATUS DO SERVIDOR**\n\n" +
+                "📁 **Mods instalados:**\n```\n" +
+                modsList +
+                "\n```"
+            );
+        }
+
+    } catch (err) {
+        console.error(err);
+        return interaction.editReply(`❌ Ocorreu um erro:\n\`\`\`\n${err.message}\n\`\`\``);
     }
 });
 
-// ==============================================
-// LOGIN DO BOT CORRIGIDO
-// ==============================================
-
+// ======================= LOGIN DO BOT =======================
 client.login(process.env.DISCORD_TOKEN);
