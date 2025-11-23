@@ -1,0 +1,11 @@
+
+{
+  "name": "discord-mc-mod-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "ssh2-sftp-client": "^9.0.0"
+  }
+}
