@@ -10,25 +10,35 @@ const ssh = new NodeSSH();
 
 // ======================= HELPERS =======================
 
-// Garante conexão SSH ativa
+// Conecta via SSH se ainda não estiver conectado
 async function ensureSSHConnection() {
     if (!ssh.isConnected()) {
         await ssh.connect({
             host: process.env.SFTP_HOST,
             port: Number(process.env.SFTP_PORT) || 22,
             username: process.env.SFTP_USER,
-            password: process.env.SFTP_PASS
+            password: process.env.SFTP_PASS,
+            // Aceita a chave do host automaticamente (apenas em ambiente seguro)
+            hostVerifier: (hash) => {
+                console.log("Fingerprint do host:", hash);
+                return true;
+            }
         });
     }
 }
 
-// Retorna lista de mods
+// Lista mods
 async function listMods() {
     await ensureSSHConnection();
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
-    const res = await ssh.execCommand(`ls -1 ${modsPath}`);
-    if (res.stderr) throw new Error(res.stderr);
-    return res.stdout.trim() || "Nenhum mod encontrado";
+    const sftp = await ssh.requestSFTP();
+    return new Promise((resolve, reject) => {
+        sftp.readdir(modsPath, (err, list) => {
+            if (err) return reject(err);
+            if (!list || list.length === 0) return resolve("Nenhum mod encontrado");
+            resolve(list.map(f => f.filename).join("\n"));
+        });
+    });
 }
 
 // Upload de mod
@@ -38,7 +48,6 @@ async function uploadMod(file) {
     const response = await fetch(file.url);
     const buffer = Buffer.from(await response.arrayBuffer());
     await fs.promises.writeFile(tempPath, buffer);
-
     await ensureSSHConnection();
     await ssh.putFile(tempPath, `${modsPath}/${file.name}`);
 }
@@ -48,15 +57,19 @@ async function removeMod(filename) {
     const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
     const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
     await ensureSSHConnection();
-    const res = await ssh.execCommand(`rm ${modsPath}/${sanitized}`);
-    if (res.stderr) throw new Error(res.stderr);
-    return sanitized;
+    const sftp = await ssh.requestSFTP();
+    return new Promise((resolve, reject) => {
+        sftp.unlink(`${modsPath}/${sanitized}`, (err) => {
+            if (err) return reject(err);
+            resolve(sanitized);
+        });
+    });
 }
 
-// Reinicia servidor
+// Reinicia servidor via script (não pede senha)
 async function restartServer() {
+    const cmd = process.env.RESTART_CMD || "/home/minecraft/mgt/restart.sh";
     await ensureSSHConnection();
-    const cmd = process.env.RESTART_CMD || "sudo /home/minecraft/mgt/restart.sh";
     const res = await ssh.execCommand(cmd);
     if (res.stderr) throw new Error(res.stderr);
     return "Servidor reiniciado com sucesso!";
