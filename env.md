@@ -11,7 +11,7 @@ SFTP_PASS=moonshine
 SFTP_MODS_PATH=mods
 RESTART_CMD=/home/container/restart.sh
 RCON_PORT=25575
-RCON_HOST=f75839cd
+RCON_HOST=enx-cirion-95.enx.host
 RCON_PASS=buther
 
 # Pterodactyl (opcional)
