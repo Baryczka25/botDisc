@@ -12,7 +12,7 @@ SFTP_MODS_PATH=mods
 RESTART_CMD=/home/container/restart.sh
 RCON_PORT=10130
 RCON_HOST=enx-cirion-95.enx.host
-RCON_PASS=buther
+RCON_PASS=buhter
 
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
