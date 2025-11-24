@@ -1,23 +1,16 @@
-// deploy-commands.js
 import { REST, Routes } from "discord.js";
 import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
+dotenv.config();
 
-// ===== Resolve o caminho do .env automaticamente =====
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, ".env") });
-
-// ===== Verifica se as variáveis estão definidas =====
+// ===== VERIFICAÇÃO DE TOKEN =====
 if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID) {
   console.error("❌ DISCORD_TOKEN ou CLIENT_ID não definido no .env");
-  console.log("Verifique se o arquivo .env está na mesma pasta deste script");
   process.exit(1);
 }
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
+// ===== COMANDOS =====
 const commands = [
   {
     name: "ping",
@@ -61,7 +54,7 @@ const commands = [
   },
   {
     name: "restart",
-    description: "Reinicia o servidor de Minecraft da EnxadaHost"
+    description: "Reinicia o servidor de Minecraft"
   },
   {
     name: "help",
@@ -69,6 +62,7 @@ const commands = [
   }
 ];
 
+// ===== REGISTRO =====
 (async () => {
   try {
     console.log("Registrando comandos...");
