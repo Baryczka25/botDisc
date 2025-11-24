@@ -10,6 +10,9 @@ SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
 SFTP_MODS_PATH=mods
 RESTART_CMD=/home/container/restart.sh
+RCON_PORT=25575
+RCON_HOST=f75839cd
+RCON_PASS=buther
 
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
