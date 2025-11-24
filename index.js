@@ -3,7 +3,7 @@ import pkg from "discord.js";
 const { Client, GatewayIntentBits, AttachmentBuilder } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
-import { Rcon } from "rcon-client";
+import Rcon from "modern-rcon";
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
@@ -76,18 +76,16 @@ async function removeMod(filename) {
 // ======================= STATUS DO SERVIDOR VIA RCON =======================
 async function getServerStatus() {
   try {
-    const rcon = await Rcon.connect({
-      host: "enx-cirion-95.enx.host",
-      port: 25575,
-      password: "buhter",
-    });
+    const rcon = new Rcon("enx-cirion-95.enx.host", 25575, "buhter");
+
+    await rcon.connect();
 
     const players = await rcon.send("list");
     const version = await rcon.send("version");
     const motd = await rcon.send("motd").catch(() => "Indisponível");
     const tps = await rcon.send("forge tps").catch(() => "Não disponível");
 
-    await rcon.end();
+    await rcon.disconnect();
 
     return {
       online: true,
