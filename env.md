@@ -8,7 +8,7 @@ SFTP_HOST=enx-cirion-95.enx.host
 SFTP_PORT=2022
 SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
-SFTP_MODS_PATH=/home/container/mods
+SFTP_MODS_PATH=mods
 RESTART_CMD=/home/container/restart.sh
 
 # Pterodactyl (opcional)

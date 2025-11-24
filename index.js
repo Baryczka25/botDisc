@@ -30,7 +30,7 @@ async function ensureSFTP() {
 // Lista mods
 async function listMods() {
   await ensureSFTP();
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
   try {
     const files = await sftp.list(modsPath);
     if (!files || files.length === 0) return "Nenhum mod encontrado";
@@ -43,7 +43,7 @@ async function listMods() {
 
 // Upload de mod
 async function uploadMod(file) {
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const tempPath = `${os.tmpdir()}/${file.name}`;
   const response = await fetch(file.url);
   const buffer = Buffer.from(await response.arrayBuffer());
@@ -59,7 +59,7 @@ async function uploadMod(file) {
 
 // Remove mod
 async function removeMod(filename) {
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
 
   await ensureSFTP();
