@@ -14,6 +14,8 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // ======================= CONFIGURAÇÕES =======================
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 const allowedMods = ["examplemod", "forge", "fabric"];
+const uploadCooldowns = new Map();
+const uploadHistory = [];
 
 // ======================= GITHUB =======================
 const octokit = new Octokit({ auth: process.env.MGT_ID });
@@ -33,7 +35,31 @@ async function uploadToGitHub(file) {
     message: `Adicionado mod ${file.name} via bot`,
     content: contentBase64,
   });
+
   console.log(`✅ Mod ${file.name} enviado para GitHub!`);
+}
+
+async function removeFromGitHub(filename) {
+  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+  try {
+    const { data: fileData } = await octokit.repos.getContent({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: `${GITHUB_PATH}/${sanitized}`,
+    });
+
+    await octokit.repos.deleteFile({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: `${GITHUB_PATH}/${sanitized}`,
+      message: `Removido mod ${sanitized} via bot`,
+      sha: fileData.sha,
+    });
+
+    console.log(`✅ Mod ${sanitized} removido do GitHub!`);
+  } catch (err) {
+    console.log(`⚠️ Não foi possível remover do GitHub: ${err.message}`);
+  }
 }
 
 // ======================= SFTP =======================
@@ -80,23 +106,16 @@ async function uploadMod(file) {
   const buffer = Buffer.from(await response.arrayBuffer());
   await fs.promises.writeFile(tempPath, buffer);
   await ensureSFTP();
-  try {
-    await sftp.put(tempPath, `${modsPath}/${file.name}`);
-  } catch (err) {
-    throw new Error(`Falha ao enviar o mod: ${err.message}`);
-  }
+  await sftp.put(tempPath, `${modsPath}/${file.name}`);
 }
 
-async function removeMod(filename) {
+async function removeModSFTP(filename) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
   await ensureSFTP();
-  try {
-    await sftp.delete(`${modsPath}/${sanitized}`);
-    return sanitized;
-  } catch (err) {
-    throw new Error(`❌ Não foi possível remover ${sanitized}: ${err.message}`);
-  }
+  await sftp.delete(`${modsPath}/${sanitized}`);
+  console.log(`✅ Mod ${sanitized} removido do SFTP!`);
+  return sanitized;
 }
 
 // ======================= PTERODACTYL API =======================
@@ -172,10 +191,7 @@ async function sendCommandPtero(command) {
   }
 }
 
-// ======================= UPLOAD CURADO E HISTÓRICO =======================
-const uploadCooldowns = new Map();
-const uploadHistory = [];
-
+// ======================= UPLOAD CURADO =======================
 function registerUpload(userId, username, fileName) {
   uploadHistory.push({
     userId,
@@ -190,7 +206,7 @@ async function uploadModCurated(interaction, file) {
   const username = interaction.user.username;
   const now = Date.now();
 
-  // Cooldown
+  // ======= COOLDOWN =======
   if (uploadCooldowns.has(userId)) {
     const lastUpload = uploadCooldowns.get(userId);
     const diff = now - lastUpload;
@@ -202,7 +218,7 @@ async function uploadModCurated(interaction, file) {
     }
   }
 
-  // Permissão básica
+  // ======= CHECAR MOD PERMITIDO =======
   const fileNameLower = file.name.toLowerCase();
   const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
   if (!allowed) {
@@ -211,17 +227,15 @@ async function uploadModCurated(interaction, file) {
     );
   }
 
-  // Upload para SFTP
+  // ======= UPLOAD =======
   await uploadMod(file);
-
-  // Upload para GitHub
   await uploadToGitHub(file);
 
-  // Histórico
+  // ======= HISTÓRICO =======
   uploadCooldowns.set(userId, now);
   registerUpload(userId, username, file.name);
 
-  // ========== 🔔 MENSAGEM NO DISCORD ==========
+  // ======= NOTIFICAÇÕES =======
   try {
     const logChannel = client.channels.cache.get(process.env.DISCORD_LOG_CHANNEL);
     if (logChannel) {
@@ -234,18 +248,30 @@ async function uploadModCurated(interaction, file) {
     console.log("Erro ao enviar mensagem no Discord:", err.message);
   }
 
-  // ========== 📢 MENSAGEM NO MINECRAFT ==========
   await sendCommandPtero(`say §eNovo mod adicionado: §b${file.name} §e— reiniciando o servidor!`);
-
-  // ========== 🔃 REINICIAR SERVIDOR ==========
   const restartMsg = await restartServerPtero();
 
-  // Resposta final da /adicionarmod
-  return interaction.editReply(
-    `✅ Mod **${file.name}** enviado!\n${restartMsg}`
-  );
+  return interaction.editReply(`✅ Mod **${file.name}** enviado!\n${restartMsg}`);
 }
 
+// ======================= REMOVER MOD =======================
+async function removeModFull(interaction, filename) {
+  await interaction.editReply("🗑 Removendo mod...");
+
+  try {
+    await removeFromGitHub(filename);
+    const removed = await removeModSFTP(filename);
+
+    await sendCommandPtero(`say §cMod removido: §b${filename} §c— reiniciando o servidor!`);
+    const restartMsg = await restartServerPtero();
+
+    return interaction.editReply(`✅ Mod **${removed}** removido!\n${restartMsg}`);
+  } catch (err) {
+    return interaction.editReply(`❌ Erro ao remover mod:\n\`\`\`\n${err.message}\n\`\`\``);
+  }
+}
+
+// ======================= HISTÓRICO =======================
 async function listUploadHistory(interaction) {
   if (!uploadHistory.length) {
     return interaction.reply("📭 Nenhum upload registrado ainda.");
@@ -268,6 +294,7 @@ async function listUploadHistory(interaction) {
 // ======================= HANDLER =======================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
   try {
     switch (interaction.commandName) {
       case "ping": return interaction.reply("🏓 Pong!");
@@ -283,20 +310,20 @@ client.on("interactionCreate", async interaction => {
           content: `📦 **Mods instalados: ${mods.length}**`,
           files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })],
         });
+
       case "adicionarmod":
         const file = interaction.options.getAttachment("arquivo");
         if (!file.name.endsWith(".jar"))
           return interaction.reply("❌ Só aceito arquivos `.jar`.");
         await interaction.reply("📤 Enviando mod...");
         return uploadModCurated(interaction, file);
+
       case "removermod":
         const name = interaction.options.getString("nome");
-        await interaction.reply("🗑 Removendo...");
-        try {
-          const removed = await removeMod(name);
-          return interaction.editReply(`✅ Mod **${removed}** removido!`);
-        } catch (err) { return interaction.editReply(err.message); }
+        return removeModFull(interaction, name);
+
       case "historico": await listUploadHistory(interaction); break;
+
       case "info":
         await interaction.reply("📡 Obtendo informações...");
         const status = await getServerStatusPtero();
@@ -307,10 +334,12 @@ client.on("interactionCreate", async interaction => {
           msg += `💾 Disco: ${Math.round(status.disk/1024/1024)} MB\n📊 Estado: ${status.status}\n`;
         } else { msg += "🔴 **Servidor Offline**\nErro: "+status.error+"\n"; }
         return interaction.editReply({ content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}` });
+
       case "restart":
         await interaction.reply("🔄 Reiniciando servidor...");
         const restartMsg = await restartServerPtero();
         return interaction.editReply(restartMsg);
+
       case "help":
         return interaction.reply({
           content:
@@ -318,13 +347,14 @@ client.on("interactionCreate", async interaction => {
             "• `/ping` — Testa o bot\n" +
             "• `/listmods` — Lista mods instalados\n" +
             "• `/adicionarmod` — Envia um mod (curadoria + cooldown + GitHub)\n" +
-            "• `/removermod` — Remove um mod\n" +
+            "• `/removermod` — Remove um mod (SFTP + GitHub)\n" +
             "• `/historico` — Lista histórico de uploads (admin)\n" +
             "• `/info` — Informações gerais\n" +
             "• `/restart` — Reinicia o servidor\n" +
             "• `/help` — Ajuda",
           ephemeral: true,
         });
+
       default: return interaction.reply("❌ Comando desconhecido.");
     }
   } catch (err) {
