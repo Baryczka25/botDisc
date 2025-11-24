@@ -10,7 +10,7 @@ SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
 SFTP_MODS_PATH=mods
 RESTART_CMD=/home/container/restart.sh
-RCON_PORT=10130
+RCON_PORT=25575
 RCON_HOST=enx-cirion-95.enx.host
 RCON_PASS=buhter
 
