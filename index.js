@@ -11,6 +11,10 @@ dotenv.config();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+// ======================= CONFIGURAÇÕES =======================
+const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
+const allowedMods = ["examplemod", "forge", "fabric"]; // palavras-chave permitidas nos mods
+
 // ======================= SFTP =======================
 const sftp = new SFTPClient();
 
@@ -97,7 +101,7 @@ async function getServerStatusPtero() {
       cpu: data.attributes.resources.cpu_absolute,
       memory: data.attributes.resources.memory_bytes,
       disk: data.attributes.resources.disk_bytes,
-      status: data.attributes.current_state
+      status: data.attributes.current_state,
     };
   } catch (err) {
     return { online: false, error: err.message };
@@ -124,6 +128,80 @@ async function restartServerPtero() {
   } catch (err) {
     return `❌ Falha ao reiniciar: ${err.message}`;
   }
+}
+
+// ======================= UPLOAD CURADO E HISTÓRICO =======================
+const uploadCooldowns = new Map();
+const uploadHistory = []; // { userId, username, fileName, timestamp }
+
+function registerUpload(userId, username, fileName) {
+  uploadHistory.push({
+    userId,
+    username,
+    fileName,
+    timestamp: Date.now(),
+  });
+}
+
+async function uploadModCurated(interaction, file) {
+  const userId = interaction.user.id;
+  const username = interaction.user.username;
+  const now = Date.now();
+
+  // ===== COOLDOWN =====
+  if (uploadCooldowns.has(userId)) {
+    const lastUpload = uploadCooldowns.get(userId);
+    const diff = now - lastUpload;
+    if (diff < COOLDOWN_TIME) {
+      const remaining = Math.ceil((COOLDOWN_TIME - diff) / 1000);
+      return interaction.editReply(
+        `⏱ Você precisa esperar mais ${remaining} segundos antes de enviar outro mod.`
+      );
+    }
+  }
+
+  // ===== CURADORIA =====
+  const fileNameLower = file.name.toLowerCase();
+  const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
+  if (!allowed) {
+    return interaction.editReply(
+      `❌ Mod **${file.name}** não está na lista de mods permitidos.`
+    );
+  }
+
+  // ===== EXECUTA UPLOAD =====
+  await uploadMod(file);
+
+  // Atualiza cooldown
+  uploadCooldowns.set(userId, now);
+
+  // Registra no histórico global
+  registerUpload(userId, username, file.name);
+
+  return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
+}
+
+async function listUploadHistory(interaction) {
+  if (!interaction.member.permissions.has("Administrator"))
+    return interaction.reply("❌ Apenas administradores podem ver o histórico.");
+
+  if (!uploadHistory.length)
+    return interaction.reply("📂 Nenhum mod foi enviado ainda.");
+
+  const historyText = uploadHistory
+    .map(
+      h =>
+        `${new Date(h.timestamp).toLocaleString()} — ${h.username} enviou ${h.fileName}`
+    )
+    .join("\n");
+
+  const filePath = `${os.tmpdir()}/upload-history.txt`;
+  await fs.promises.writeFile(filePath, historyText);
+
+  return interaction.reply({
+    content: `📂 **Histórico de uploads (${uploadHistory.length})**`,
+    files: [new AttachmentBuilder(filePath, { name: "upload-history.txt" })],
+  });
 }
 
 // ======================= HANDLER =======================
@@ -156,8 +234,7 @@ client.on("interactionCreate", async interaction => {
         if (!file.name.endsWith(".jar"))
           return interaction.reply("❌ Só aceito arquivos `.jar`.");
         await interaction.reply("📤 Enviando mod...");
-        await uploadMod(file);
-        return interaction.editReply(`✅ Mod **${file.name}** enviado!`);
+        return uploadModCurated(interaction, file);
 
       case "removemod":
         const name = interaction.options.getString("nome");
@@ -168,6 +245,10 @@ client.on("interactionCreate", async interaction => {
         } catch (err) {
           return interaction.editReply(err.message);
         }
+
+      case "uploadhistory":
+        await listUploadHistory(interaction);
+        break;
 
       case "info":
         await interaction.reply("📡 Obtendo informações...");
@@ -200,8 +281,9 @@ client.on("interactionCreate", async interaction => {
             "📘 **Comandos Disponíveis:**\n\n" +
             "• `/ping` — Testa o bot\n" +
             "• `/listmods` — Lista mods instalados\n" +
-            "• `/uploadmod` — Envia um mod\n" +
+            "• `/uploadmod` — Envia um mod (com curadoria e cooldown)\n" +
             "• `/removemod` — Remove um mod\n" +
+            "• `/uploadhistory` — Lista histórico de uploads (admin)\n" +
             "• `/info` — Informações gerais\n" +
             "• `/restart` — Reinicia o servidor\n" +
             "• `/help` — Ajuda",
