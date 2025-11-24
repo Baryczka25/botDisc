@@ -3,25 +3,22 @@ import pkg from "discord.js";
 const { Client, GatewayIntentBits, AttachmentBuilder } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
-import { Rcon } from "rcon-client";
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 dotenv.config();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// Criar instancia única de SFTP
+// ======================= SFTP =======================
 const sftp = new SFTPClient();
 
-// ======================= SFTP SAFE CONNECT =======================
 async function ensureSFTP() {
   try {
-    // Testa se está conectado realmente
     await sftp.list("/");
   } catch (err) {
     console.log("🔄 SFTP desconectado — reconectando...");
-
     try {
       await sftp.connect({
         host: process.env.SFTP_HOST,
@@ -30,20 +27,17 @@ async function ensureSFTP() {
         password: process.env.SFTP_PASS,
         hostVerifier: () => true,
       });
-
       console.log("✅ SFTP conectado!");
-    } catch (connectionError) {
-      console.error("❌ Falha ao reconectar ao SFTP:", connectionError.message);
-      throw connectionError;
+    } catch (err) {
+      console.error("❌ Falha ao conectar SFTP:", err.message);
+      throw err;
     }
   }
 }
 
-// ======================= LISTAR MODS =======================
 async function listMods() {
   await ensureSFTP();
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
-
   try {
     const files = await sftp.list(modsPath);
     if (!files?.length) return "Nenhum mod encontrado";
@@ -54,17 +48,13 @@ async function listMods() {
   }
 }
 
-// ======================= UPLOAD =======================
 async function uploadMod(file) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const tempPath = `${os.tmpdir()}/${file.name}`;
-
   const response = await fetch(file.url);
   const buffer = Buffer.from(await response.arrayBuffer());
   await fs.promises.writeFile(tempPath, buffer);
-
   await ensureSFTP();
-
   try {
     await sftp.put(tempPath, `${modsPath}/${file.name}`);
   } catch (err) {
@@ -72,11 +62,9 @@ async function uploadMod(file) {
   }
 }
 
-// ======================= REMOVER =======================
 async function removeMod(filename) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
-
   await ensureSFTP();
   try {
     await sftp.delete(`${modsPath}/${sanitized}`);
@@ -86,34 +74,55 @@ async function removeMod(filename) {
   }
 }
 
-// ======================= RCON STATUS =======================
-async function getServerStatus() {
+// ======================= PTERODACTYL API =======================
+async function getServerStatusPtero() {
   try {
-    const rcon = await Rcon.connect({
-      host: process.env.RCON_HOST,
-      port: Number(process.env.RCON_PORT),
-      password: process.env.RCON_PASS,
-    });
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/resources`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      }
+    );
 
-    const players = await rcon.send("list");
-    const version = await rcon.send("version");
-    const motd = await rcon.send("motd").catch(() => "Indisponível");
-    const tps = await rcon.send("forge tps").catch(() => "Não disponível");
-
-    await rcon.end();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
 
     return {
       online: true,
-      players,
-      version,
-      motd,
-      tps,
+      cpu: data.attributes.current_state.cpu_absolute,
+      memory: data.attributes.current_state.memory_bytes,
+      disk: data.attributes.current_state.disk_bytes,
+      status: data.attributes.current_state.state,
     };
   } catch (err) {
-    return {
-      online: false,
-      error: err.message,
-    };
+    return { online: false, error: err.message };
+  }
+}
+
+async function restartServerPtero() {
+  try {
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ signal: "restart" }),
+      }
+    );
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return "✅ Servidor reiniciado!";
+  } catch (err) {
+    return `❌ Falha ao reiniciar: ${err.message}`;
   }
 }
 
@@ -123,14 +132,12 @@ client.on("interactionCreate", async interaction => {
 
   try {
     switch (interaction.commandName) {
-
       case "ping":
         return interaction.reply("🏓 Pong!");
 
       case "listmods":
         await interaction.reply("🔍 Listando mods...");
         const raw = await listMods();
-
         const mods = raw
           .split("\n")
           .map(x => x.trim())
@@ -150,7 +157,6 @@ client.on("interactionCreate", async interaction => {
         const file = interaction.options.getAttachment("arquivo");
         if (!file.name.endsWith(".jar"))
           return interaction.reply("❌ Só aceito arquivos `.jar`.");
-
         await interaction.reply("📤 Enviando mod...");
         await uploadMod(file);
         return interaction.editReply(`✅ Mod **${file.name}** enviado!`);
@@ -167,19 +173,17 @@ client.on("interactionCreate", async interaction => {
 
       case "info":
         await interaction.reply("📡 Obtendo informações...");
-
-        const status = await getServerStatus();
+        const status = await getServerStatusPtero();
         let msg = "";
-
         if (status.online) {
-          msg += "🟢 **Servidor Online**\n";
-          msg += `🎮 Jogadores: ${status.players}\n`;
-          msg += `🔧 Versão:\n${status.version}\n`;
-          msg += `📝 MOTD:\n${status.motd}\n`;
-          msg += `📊 TPS:\n${status.tps}\n\n`;
+          msg += `🟢 **Servidor Online**\n`;
+          msg += `💻 CPU: ${status.cpu}%\n`;
+          msg += `🧠 Memória: ${Math.round(status.memory / 1024 / 1024)} MB\n`;
+          msg += `💾 Disco: ${Math.round(status.disk / 1024 / 1024)} MB\n`;
+          msg += `📊 Estado: ${status.status}\n`;
         } else {
           msg += "🔴 **Servidor Offline**\n";
-          msg += `Erro: ${status.error}\n\n`;
+          msg += `Erro: ${status.error}\n`;
         }
 
         const modsInfoRaw = await listMods();
@@ -197,6 +201,11 @@ client.on("interactionCreate", async interaction => {
           files: [new AttachmentBuilder(modsInfoPath, { name: "mods-info.txt" })],
         });
 
+      case "restart":
+        await interaction.reply("🔄 Reiniciando servidor...");
+        const restartMsg = await restartServerPtero();
+        return interaction.editReply(restartMsg);
+
       case "help":
         return interaction.reply({
           content:
@@ -206,6 +215,7 @@ client.on("interactionCreate", async interaction => {
             "• `/uploadmod` — Envia um mod\n" +
             "• `/removemod` — Remove um mod\n" +
             "• `/info` — Informações gerais\n" +
+            "• `/restart` — Reinicia o servidor\n" +
             "• `/help` — Ajuda",
           ephemeral: true,
         });
