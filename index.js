@@ -246,24 +246,6 @@ async function uploadModCurated(interaction, file) {
   );
 }
 
-async function listUploadHistory(interaction) {
-  if (!uploadHistory.length) {
-    return interaction.reply("📭 Nenhum upload registrado ainda.");
-  }
-
-  const lines = uploadHistory
-    .slice(-20)
-    .map(item => {
-      const date = new Date(item.timestamp).toLocaleString("pt-BR");
-      return `👤 **${item.username}** — 📦 *${item.fileName}* — 🕒 ${date}`;
-    })
-    .join("\n");
-
-  return interaction.reply({
-    content: `📜 **Últimos uploads registrados:**\n\n${lines}`,
-    ephemeral: true
-  });
-}
 
 // ======================= HANDLER =======================
 client.on("interactionCreate", async interaction => {
