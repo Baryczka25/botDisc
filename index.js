@@ -202,11 +202,13 @@ function registerUpload(userId, username, fileName) {
 }
 
 async function uploadModCurated(interaction, file) {
+  // Defer a resposta antes de qualquer operação longa
+  await interaction.deferReply();
+
   const userId = interaction.user.id;
   const username = interaction.user.username;
   const now = Date.now();
 
-  // ======= COOLDOWN =======
   if (uploadCooldowns.has(userId)) {
     const lastUpload = uploadCooldowns.get(userId);
     const diff = now - lastUpload;
@@ -218,7 +220,6 @@ async function uploadModCurated(interaction, file) {
     }
   }
 
-  // ======= CHECAR MOD PERMITIDO =======
   const fileNameLower = file.name.toLowerCase();
   const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
   if (!allowed) {
@@ -227,15 +228,12 @@ async function uploadModCurated(interaction, file) {
     );
   }
 
-  // ======= UPLOAD =======
   await uploadMod(file);
   await uploadToGitHub(file);
 
-  // ======= HISTÓRICO =======
   uploadCooldowns.set(userId, now);
   registerUpload(userId, username, file.name);
 
-  // ======= NOTIFICAÇÕES =======
   try {
     const logChannel = client.channels.cache.get(process.env.DISCORD_LOG_CHANNEL);
     if (logChannel) {
@@ -256,7 +254,7 @@ async function uploadModCurated(interaction, file) {
 
 // ======================= REMOVER MOD =======================
 async function removeModFull(interaction, filename) {
-  await interaction.editReply("🗑 Removendo mod...");
+  await interaction.deferReply();
 
   try {
     await removeFromGitHub(filename);
@@ -273,8 +271,10 @@ async function removeModFull(interaction, filename) {
 
 // ======================= HISTÓRICO =======================
 async function listUploadHistory(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!uploadHistory.length) {
-    return interaction.reply("📭 Nenhum upload registrado ainda.");
+    return interaction.editReply("📭 Nenhum upload registrado ainda.");
   }
 
   const lines = uploadHistory
@@ -285,10 +285,7 @@ async function listUploadHistory(interaction) {
     })
     .join("\n");
 
-  return interaction.reply({
-    content: `📜 **Últimos uploads registrados:**\n\n${lines}`,
-    ephemeral: true
-  });
+  return interaction.editReply(`📜 **Últimos uploads registrados:**\n\n${lines}`);
 }
 
 // ======================= HANDLER =======================
@@ -299,7 +296,7 @@ client.on("interactionCreate", async interaction => {
     switch (interaction.commandName) {
       case "ping": return interaction.reply("🏓 Pong!");
       case "listmods":
-        await interaction.reply("🔍 Listando mods...");
+        await interaction.deferReply();
         const raw = await listMods();
         const mods = raw
           .split("\n").map(x => x.trim()).filter(Boolean)
@@ -315,17 +312,17 @@ client.on("interactionCreate", async interaction => {
         const file = interaction.options.getAttachment("arquivo");
         if (!file.name.endsWith(".jar"))
           return interaction.reply("❌ Só aceito arquivos `.jar`.");
-        await interaction.reply("📤 Enviando mod...");
         return uploadModCurated(interaction, file);
 
       case "removermod":
         const name = interaction.options.getString("nome");
         return removeModFull(interaction, name);
 
-      case "historico": await listUploadHistory(interaction); break;
+      case "historico":
+        return listUploadHistory(interaction);
 
       case "info":
-        await interaction.reply("📡 Obtendo informações...");
+        await interaction.deferReply();
         const status = await getServerStatusPtero();
         let msg = "";
         if (status.online) {
@@ -333,33 +330,37 @@ client.on("interactionCreate", async interaction => {
           msg += `🧠 Memória: ${Math.round(status.memory/1024/1024)} MB\n`;
           msg += `💾 Disco: ${Math.round(status.disk/1024/1024)} MB\n📊 Estado: ${status.status}\n`;
         } else { msg += "🔴 **Servidor Offline**\nErro: "+status.error+"\n"; }
-        return interaction.editReply({ content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}` });
+        return interaction.editReply(`**ℹ️ STATUS DO SERVIDOR**\n\n${msg}`);
 
       case "restart":
-        await interaction.reply("🔄 Reiniciando servidor...");
+        await interaction.deferReply();
         const restartMsg = await restartServerPtero();
         return interaction.editReply(restartMsg);
 
       case "help":
-        return interaction.reply({
-          content:
-            "📘 **Comandos Disponíveis:**\n\n" +
-            "• `/ping` — Testa o bot\n" +
-            "• `/listmods` — Lista mods instalados\n" +
-            "• `/adicionarmod` — Envia um mod (curadoria + cooldown + GitHub)\n" +
-            "• `/removermod` — Remove um mod (SFTP + GitHub)\n" +
-            "• `/historico` — Lista histórico de uploads (admin)\n" +
-            "• `/info` — Informações gerais\n" +
-            "• `/restart` — Reinicia o servidor\n" +
-            "• `/help` — Ajuda",
-          ephemeral: true,
-        });
+        await interaction.deferReply({ ephemeral: true });
+        return interaction.editReply(
+          "📘 **Comandos Disponíveis:**\n\n" +
+          "• `/ping` — Testa o bot\n" +
+          "• `/listmods` — Lista mods instalados\n" +
+          "• `/adicionarmod` — Envia um mod (curadoria + cooldown + GitHub)\n" +
+          "• `/removermod` — Remove um mod (SFTP + GitHub)\n" +
+          "• `/historico` — Lista histórico de uploads (admin)\n" +
+          "• `/info` — Informações gerais\n" +
+          "• `/restart` — Reinicia o servidor\n" +
+          "• `/help` — Ajuda"
+        );
 
       default: return interaction.reply("❌ Comando desconhecido.");
     }
   } catch (err) {
     console.error(err);
-    return interaction.editReply(`❌ Erro:\n\`\`\`\n${err.message}\n\`\`\``);
+    try { 
+      if (interaction.deferred || interaction.replied)
+        return interaction.editReply(`❌ Erro:\n\`\`\`\n${err.message}\n\`\`\``);
+      else
+        return interaction.reply(`❌ Erro:\n\`\`\`\n${err.message}\n\`\`\``);
+    } catch {}
   }
 });
 
