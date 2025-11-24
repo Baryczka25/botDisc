@@ -1,20 +1,33 @@
+// deploy-commands.js
 import { REST, Routes } from "discord.js";
 import dotenv from "dotenv";
 dotenv.config();
 
+// Verifica se o token e client_id estão definidos
+if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID) {
+  console.error("❌ DISCORD_TOKEN ou CLIENT_ID não definido no .env");
+  process.exit(1);
+}
+
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 const commands = [
-  { name: "ping", description: "Testa o bot" },
-  { name: "listmods", description: "Lista mods instalados" },
+  {
+    name: "ping",
+    description: "Testa se o bot está online"
+  },
+  {
+    name: "listmods",
+    description: "Lista os mods instalados no servidor"
+  },
   {
     name: "adicionarmod",
     description: "Envia um mod .jar (com curadoria e cooldown)",
     options: [
       {
         name: "arquivo",
-        description: "Arquivo .jar do mod",
-        type: 11, // ATTACHMENT
+        description: "Envie o arquivo .jar do mod",
+        type: 11, // Attachment
         required: true
       }
     ]
@@ -26,18 +39,27 @@ const commands = [
       {
         name: "nome",
         description: "Nome exato do mod (ex: mod.jar)",
-        type: 3, // STRING
+        type: 3, // String
         required: true
       }
     ]
   },
   {
     name: "historico",
-    description: "Lista histórico de uploads (apenas admins)"
+    description: "Lista histórico de uploads (apenas admin)"
   },
-  { name: "info", description: "Mostra informações gerais do servidor" },
-  { name: "restart", description: "Reinicia o servidor" },
-  { name: "help", description: "Mostra todos os comandos disponíveis" }
+  {
+    name: "info",
+    description: "Mostra informações do servidor (status, mods, etc)"
+  },
+  {
+    name: "restart",
+    description: "Reinicia o servidor de Minecraft da EnxadaHost"
+  },
+  {
+    name: "help",
+    description: "Mostra todos os comandos disponíveis"
+  }
 ];
 
 (async () => {
@@ -46,6 +68,6 @@ const commands = [
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
     console.log("✅ Comandos registrados!");
   } catch (err) {
-    console.error(err);
+    console.error("❌ Erro ao registrar comandos:", err);
   }
 })();
