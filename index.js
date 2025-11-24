@@ -149,6 +149,29 @@ async function restartServerPtero() {
   }
 }
 
+async function sendCommandPtero(command) {
+  try {
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ command }),
+      }
+    );
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return true;
+  } catch (e) {
+    console.log("Erro ao enviar comando:", e.message);
+    return false;
+  }
+}
+
 // ======================= UPLOAD CURADO E HISTÓRICO =======================
 const uploadCooldowns = new Map();
 const uploadHistory = [];
@@ -167,6 +190,7 @@ async function uploadModCurated(interaction, file) {
   const username = interaction.user.username;
   const now = Date.now();
 
+  // Cooldown
   if (uploadCooldowns.has(userId)) {
     const lastUpload = uploadCooldowns.get(userId);
     const diff = now - lastUpload;
@@ -178,6 +202,7 @@ async function uploadModCurated(interaction, file) {
     }
   }
 
+  // Permissão básica
   const fileNameLower = file.name.toLowerCase();
   const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
   if (!allowed) {
@@ -186,33 +211,41 @@ async function uploadModCurated(interaction, file) {
     );
   }
 
+  // Upload para SFTP
   await uploadMod(file);
+
+  // Upload para GitHub
   await uploadToGitHub(file);
 
+  // Histórico
   uploadCooldowns.set(userId, now);
   registerUpload(userId, username, file.name);
 
-  return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
+  // ========== 🔔 MENSAGEM NO DISCORD ==========
+  try {
+    const logChannel = client.channels.cache.get(process.env.DISCORD_LOG_CHANNEL);
+    if (logChannel) {
+      await logChannel.send({
+        content:
+          `📥 **Novo mod enviado!**\n👤 Autor: **${username}**\n📦 Mod: \`${file.name}\`\n🔄 **Reiniciando o servidor...**`
+      });
+    }
+  } catch (err) {
+    console.log("Erro ao enviar mensagem no Discord:", err.message);
+  }
+
+  // ========== 📢 MENSAGEM NO MINECRAFT ==========
+  await sendCommandPtero(`say §eNovo mod adicionado: §b${file.name} §e— reiniciando o servidor!`);
+
+  // ========== 🔃 REINICIAR SERVIDOR ==========
+  const restartMsg = await restartServerPtero();
+
+  // Resposta final da /adicionarmod
+  return interaction.editReply(
+    `✅ Mod **${file.name}** enviado!\n${restartMsg}`
+  );
 }
 
-async function listUploadHistory(interaction) {
-  if (!interaction.member.permissions.has("Administrator"))
-    return interaction.reply("❌ Apenas administradores podem ver o histórico.");
-  if (!uploadHistory.length)
-    return interaction.reply("📂 Nenhum mod foi enviado ainda.");
-
-  const historyText = uploadHistory
-    .map(h => `${new Date(h.timestamp).toLocaleString()} — ${h.username} enviou ${h.fileName}`)
-    .join("\n");
-
-  const filePath = `${os.tmpdir()}/upload-history.txt`;
-  await fs.promises.writeFile(filePath, historyText);
-
-  return interaction.reply({
-    content: `📂 **Histórico de uploads (${uploadHistory.length})**`,
-    files: [new AttachmentBuilder(filePath, { name: "upload-history.txt" })],
-  });
-}
 
 // ======================= HANDLER =======================
 client.on("interactionCreate", async interaction => {
