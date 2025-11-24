@@ -83,8 +83,25 @@ client.on("interactionCreate", async interaction => {
 
       case "listmods":
         await interaction.reply("🔍 Listando mods...");
-        const modsList = await listMods();
-        return interaction.editReply(`📦 **Mods instalados:**\n\`\`\`\n${modsList}\n\`\`\``);
+
+        const modsListRaw = await listMods();
+        const modsArray = modsListRaw
+          .split("\n")
+          .map(name => name.trim())
+          .filter(name => name)
+          .map(name => name.replace(/\.jar$/i, ""))
+          .sort();
+
+        const cleanedList = modsArray.join("\n");
+        const tempFile = `${os.tmpdir()}/mods-list.txt`;
+        await fs.promises.writeFile(tempFile, cleanedList);
+
+        const attachment = new AttachmentBuilder(tempFile, { name: "mods-list.txt" });
+
+        return interaction.editReply({
+          content: `📦 **Lista de mods (${modsArray.length})**`,
+          files: [attachment],
+        });
 
       case "uploadmod":
         const file = interaction.options.getAttachment("arquivo");
@@ -106,10 +123,25 @@ client.on("interactionCreate", async interaction => {
 
       case "info":
         await interaction.reply("📡 Coletando informações...");
-        const mods = await listMods();
-        return interaction.editReply(
-          `**ℹ️ STATUS DO SERVIDOR**\n\n📁 **Mods instalados:**\n\`\`\`\n${mods}\n\`\`\``
-        );
+
+        const modsInfoRaw = await listMods();
+        const modsInfoArray = modsInfoRaw
+          .split("\n")
+          .map(name => name.trim())
+          .filter(name => name)
+          .map(name => name.replace(/\.jar$/i, ""))
+          .sort();
+
+        const modsInfoList = modsInfoArray.join("\n");
+        const tempInfoFile = `${os.tmpdir()}/mods-info.txt`;
+        await fs.promises.writeFile(tempInfoFile, modsInfoList);
+
+        const infoAttachment = new AttachmentBuilder(tempInfoFile, { name: "mods-info.txt" });
+
+        return interaction.editReply({
+          content: `**ℹ️ STATUS DO SERVIDOR**\n📁 **Mods instalados (${modsInfoArray.length})**`,
+          files: [infoAttachment],
+        });
 
       case "help":
         return interaction.reply({
