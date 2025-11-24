@@ -12,7 +12,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ======================= CONFIGURAÇÕES =======================
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
-const allowedMods = ["examplemod", "forge", "fabric"]; // palavras-chave permitidas
+const allowedMods = ["examplemod", "forge", "fabric"]; // palavras-chave permitidas nos mods
 
 // ======================= SFTP =======================
 const sftp = new SFTPClient();
@@ -134,7 +134,12 @@ const uploadCooldowns = new Map();
 const uploadHistory = []; // { userId, username, fileName, timestamp }
 
 function registerUpload(userId, username, fileName) {
-  uploadHistory.push({ userId, username, fileName, timestamp: Date.now() });
+  uploadHistory.push({
+    userId,
+    username,
+    fileName,
+    timestamp: Date.now(),
+  });
 }
 
 async function uploadModCurated(interaction, file) {
@@ -183,7 +188,10 @@ async function listUploadHistory(interaction) {
     return interaction.reply("📂 Nenhum mod foi enviado ainda.");
 
   const historyText = uploadHistory
-    .map(h => `${new Date(h.timestamp).toLocaleString()} — ${h.username} enviou ${h.fileName}`)
+    .map(
+      h =>
+        `${new Date(h.timestamp).toLocaleString()} — ${h.username} enviou ${h.fileName}`
+    )
     .join("\n");
 
   const filePath = `${os.tmpdir()}/upload-history.txt`;
@@ -203,6 +211,7 @@ client.on("interactionCreate", async interaction => {
     switch (interaction.commandName) {
       case "ping":
         return interaction.reply("🏓 Pong!");
+
       case "listmods":
         await interaction.reply("🔍 Listando mods...");
         const raw = await listMods();
@@ -218,11 +227,14 @@ client.on("interactionCreate", async interaction => {
           content: `📦 **Mods instalados: ${mods.length}**`,
           files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })],
         });
+
       case "adicionarmod":
         const file = interaction.options.getAttachment("arquivo");
-        if (!file.name.endsWith(".jar")) return interaction.reply("❌ Só aceito arquivos `.jar`.");
+        if (!file.name.endsWith(".jar"))
+          return interaction.reply("❌ Só aceito arquivos `.jar`.");
         await interaction.reply("📤 Enviando mod...");
         return uploadModCurated(interaction, file);
+
       case "removermod":
         const name = interaction.options.getString("nome");
         await interaction.reply("🗑 Removendo...");
@@ -232,9 +244,11 @@ client.on("interactionCreate", async interaction => {
         } catch (err) {
           return interaction.editReply(err.message);
         }
+
       case "historico":
         await listUploadHistory(interaction);
         break;
+
       case "info":
         await interaction.reply("📡 Obtendo informações...");
         const status = await getServerStatusPtero();
@@ -249,11 +263,15 @@ client.on("interactionCreate", async interaction => {
           msg += "🔴 **Servidor Offline**\n";
           msg += `Erro: ${status.error}\n`;
         }
-        return interaction.editReply({ content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}` });
+        return interaction.editReply({
+          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}`,
+        });
+
       case "restart":
         await interaction.reply("🔄 Reiniciando servidor...");
         const restartMsg = await restartServerPtero();
         return interaction.editReply(restartMsg);
+
       case "help":
         return interaction.reply({
           content:
@@ -268,6 +286,7 @@ client.on("interactionCreate", async interaction => {
             "• `/help` — Ajuda",
           ephemeral: true,
         });
+
       default:
         return interaction.reply("❌ Comando desconhecido.");
     }

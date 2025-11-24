@@ -10,16 +10,30 @@ const commands = [
   {
     name: "adicionarmod",
     description: "Envia um mod .jar para a pasta mods (com curadoria e cooldown)",
-    options: [{ name: "arquivo", description: "Envie o arquivo .jar do mod", type: 11, required: true }]
+    options: [
+      {
+        name: "arquivo",
+        description: "Envie o arquivo .jar do mod",
+        type: 11, // ATTACHMENT
+        required: true
+      }
+    ]
   },
   {
     name: "removermod",
     description: "Remove um mod pelo nome",
-    options: [{ name: "nome", description: "Nome exato do mod (exemplo: mod.jar)", type: 3, required: true }]
+    options: [
+      {
+        name: "nome",
+        description: "Nome exato do mod (exemplo: mod.jar)",
+        type: 3, // STRING
+        required: true
+      }
+    ]
   },
   { name: "historico", description: "Mostra o histórico de uploads de mods (apenas administradores)" },
+  { name: "info", description: "Mostra informações do servidor (status, mods, etc)" },
   { name: "restart", description: "Reinicia o servidor de Minecraft da EnxadaHost" },
-  { name: "info", description: "Mostra informações do servidor (status, CPU, memória, disco)" },
   { name: "help", description: "Mostra todos os comandos disponíveis" }
 ];
 
@@ -27,7 +41,7 @@ const commands = [
   try {
     console.log("Registrando comandos...");
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    console.log("✅ Comandos registrados!");
+    console.log("Comandos registrados!");
   } catch (err) {
     console.error(err);
   }
