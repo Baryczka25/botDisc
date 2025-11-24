@@ -13,6 +13,6 @@ RESTART_CMD=/home/container/restart.sh
 
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
-PTERO_API_KEY=ptlc_uipqzETArb7e0atTJXIrvyTvu6gC0YtfZCMOsku7wQT
-PTERO_SERVER_ID=enx-cirion-95.enx.host:10130
+PTERO_API_KEY=ptlc_6Qhizdt7GtYLca4FblIP2Y9Ltx7nq4equbuiERLduxr
+PTERO_SERVER_ID=f75839cd
 
