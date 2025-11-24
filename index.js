@@ -43,7 +43,7 @@ async function listMods() {
 
 // Upload de mod
 async function uploadMod(file) {
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
   const tempPath = `${os.tmpdir()}/${file.name}`;
   const response = await fetch(file.url);
   const buffer = Buffer.from(await response.arrayBuffer());

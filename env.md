@@ -8,8 +8,8 @@ SFTP_HOST=enx-cirion-95.enx.host
 SFTP_PORT=2022
 SFTP_USER=dwho4u2a.f75839cd
 SFTP_PASS=moonshine
-SFTP_MODS_PATH=/home/minecraft/mgt/mods
-RESTART_CMD=/home/minecraft/mgt/restart.sh
+SFTP_MODS_PATH=/home/container/mods
+RESTART_CMD=/home/container/restart.sh
 
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
