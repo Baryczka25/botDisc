@@ -281,9 +281,9 @@ client.on("interactionCreate", async interaction => {
             "📘 **Comandos Disponíveis:**\n\n" +
             "• `/ping` — Testa o bot\n" +
             "• `/listmods` — Lista mods instalados\n" +
-            "• `/uploadmod` — Envia um mod (com curadoria e cooldown)\n" +
-            "• `/removemod` — Remove um mod\n" +
-            "• `/uploadhistory` — Lista histórico de uploads (admin)\n" +
+            "• `/adicionarmod` — Envia um mod (com curadoria e cooldown)\n" +
+            "• `/removermod` — Remove um mod\n" +
+            "• `/historico` — Lista histórico de uploads (admin)\n" +
             "• `/info` — Informações gerais\n" +
             "• `/restart` — Reinicia o servidor\n" +
             "• `/help` — Ajuda",
