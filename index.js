@@ -3,6 +3,7 @@ import pkg from "discord.js";
 const { Client, GatewayIntentBits, AttachmentBuilder } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
+import { Rcon } from "rcon-client";
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
@@ -21,7 +22,7 @@ async function ensureSFTP() {
       port: Number(process.env.SFTP_PORT) || 22,
       username: process.env.SFTP_USER,
       password: process.env.SFTP_PASS,
-      hostVerifier: () => true, // aceita qualquer fingerprint
+      hostVerifier: () => true,
     });
     console.log("✅ Conectado ao servidor via SFTP!");
   }
@@ -69,6 +70,37 @@ async function removeMod(filename) {
   } catch (err) {
     console.error(`Erro ao remover ${sanitized}:`, err.message);
     throw new Error(`Não foi possível remover ${sanitized}: ${err.message}`);
+  }
+}
+
+// ======================= STATUS DO SERVIDOR VIA RCON =======================
+async function getServerStatus() {
+  try {
+    const rcon = await Rcon.connect({
+      host: "enx-cirion-95.enx.host",
+      port: 25575,
+      password: "buhter",
+    });
+
+    const players = await rcon.send("list");
+    const version = await rcon.send("version");
+    const motd = await rcon.send("motd").catch(() => "Indisponível");
+    const tps = await rcon.send("forge tps").catch(() => "Não disponível");
+
+    await rcon.end();
+
+    return {
+      online: true,
+      players,
+      version,
+      motd,
+      tps,
+    };
+  } catch (err) {
+    return {
+      online: false,
+      error: err.message,
+    };
   }
 }
 
@@ -124,6 +156,20 @@ client.on("interactionCreate", async interaction => {
       case "info":
         await interaction.reply("📡 Coletando informações...");
 
+        const status = await getServerStatus();
+        let msg = "";
+
+        if (status.online) {
+          msg += "🟢 **Servidor Online**\n";
+          msg += `🎮 **Jogadores:** ${status.players}\n\n`;
+          msg += `🔧 **Versão:**\n${status.version}\n\n`;
+          msg += `📝 **MOTD:**\n${status.motd}\n\n`;
+          msg += `📊 **TPS:**\n${status.tps}\n\n`;
+        } else {
+          msg += "🔴 **Servidor Offline**\n";
+          msg += `Erro: ${status.error}\n\n`;
+        }
+
         const modsInfoRaw = await listMods();
         const modsInfoArray = modsInfoRaw
           .split("\n")
@@ -132,14 +178,14 @@ client.on("interactionCreate", async interaction => {
           .map(name => name.replace(/\.jar$/i, ""))
           .sort();
 
-        const modsInfoList = modsInfoArray.join("\n");
+        const modsFileContent = modsInfoArray.join("\n");
         const tempInfoFile = `${os.tmpdir()}/mods-info.txt`;
-        await fs.promises.writeFile(tempInfoFile, modsInfoList);
+        await fs.promises.writeFile(tempInfoFile, modsFileContent);
 
         const infoAttachment = new AttachmentBuilder(tempInfoFile, { name: "mods-info.txt" });
 
         return interaction.editReply({
-          content: `**ℹ️ STATUS DO SERVIDOR**\n📁 **Mods instalados (${modsInfoArray.length})**`,
+          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}📁 **Mods instalados (${modsInfoArray.length})**`,
           files: [infoAttachment],
         });
 
