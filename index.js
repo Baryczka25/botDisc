@@ -17,7 +17,7 @@ const sftp = new SFTPClient();
 async function ensureSFTP() {
   try {
     await sftp.list("/");
-  } catch (err) {
+  } catch {
     console.log("🔄 SFTP desconectado — reconectando...");
     try {
       await sftp.connect({
@@ -93,11 +93,11 @@ async function getServerStatusPtero() {
     const data = await res.json();
 
     return {
-      online: true,
-      cpu: data.attributes.current_state.cpu_absolute,
-      memory: data.attributes.current_state.memory_bytes,
-      disk: data.attributes.current_state.disk_bytes,
-      status: data.attributes.current_state.state,
+      online: data.attributes.current_state === "running",
+      cpu: data.attributes.resources.cpu_absolute,
+      memory: data.attributes.resources.memory_bytes,
+      disk: data.attributes.resources.disk_bytes,
+      status: data.attributes.current_state
     };
   } catch (err) {
     return { online: false, error: err.message };
@@ -144,10 +144,8 @@ client.on("interactionCreate", async interaction => {
           .filter(Boolean)
           .map(x => x.replace(/\.jar$/i, ""))
           .sort();
-
         const filePath = `${os.tmpdir()}/mods-list.txt`;
         await fs.promises.writeFile(filePath, mods.join("\n"));
-
         return interaction.editReply({
           content: `📦 **Mods instalados: ${mods.length}**`,
           files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })],
@@ -176,10 +174,12 @@ client.on("interactionCreate", async interaction => {
         const status = await getServerStatusPtero();
         let msg = "";
         if (status.online) {
+          const memoryGB = (status.memory / 1024 / 1024 / 1024).toFixed(2);
+          const diskGB = (status.disk / 1024 / 1024 / 1024).toFixed(2);
           msg += `🟢 **Servidor Online**\n`;
           msg += `💻 CPU: ${status.cpu}%\n`;
-          msg += `🧠 Memória: ${Math.round(status.memory / 1024 / 1024)} MB\n`;
-          msg += `💾 Disco: ${Math.round(status.disk / 1024 / 1024)} MB\n`;
+          msg += `🧠 Memória: ${memoryGB} GB\n`;
+          msg += `💾 Disco: ${diskGB} GB\n`;
           msg += `📊 Estado: ${status.status}\n`;
         } else {
           msg += "🔴 **Servidor Offline**\n";
@@ -192,7 +192,6 @@ client.on("interactionCreate", async interaction => {
           .map(x => x.trim())
           .filter(Boolean)
           .sort();
-
         const modsInfoPath = `${os.tmpdir()}/mods-info.txt`;
         await fs.promises.writeFile(modsInfoPath, modsList.join("\n"));
 
