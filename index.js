@@ -1,5 +1,5 @@
 import pkg from "discord.js";
-const { Client, GatewayIntentBits, AttachmentBuilder, PermissionsBitField } = pkg;
+const { Client, GatewayIntentBits, AttachmentBuilder } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
 import fs from "fs";
@@ -181,7 +181,7 @@ async function uploadModCurated(interaction, file) {
 }
 
 async function listUploadHistory(interaction) {
-  if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
+  if (!interaction.member.permissions.has("Administrator"))
     return interaction.reply("❌ Apenas administradores podem ver o histórico.");
 
   if (!uploadHistory.length)
