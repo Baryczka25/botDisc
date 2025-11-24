@@ -173,31 +173,20 @@ client.on("interactionCreate", async interaction => {
         await interaction.reply("📡 Obtendo informações...");
         const status = await getServerStatusPtero();
         let msg = "";
+
         if (status.online) {
-          const memoryGB = (status.memory / 1024 / 1024 / 1024).toFixed(2);
-          const diskGB = (status.disk / 1024 / 1024 / 1024).toFixed(2);
           msg += `🟢 **Servidor Online**\n`;
           msg += `💻 CPU: ${status.cpu}%\n`;
-          msg += `🧠 Memória: ${memoryGB} GB\n`;
-          msg += `💾 Disco: ${diskGB} GB\n`;
+          msg += `🧠 Memória: ${Math.round(status.memory / 1024 / 1024)} MB\n`;
+          msg += `💾 Disco: ${Math.round(status.disk / 1024 / 1024)} MB\n`;
           msg += `📊 Estado: ${status.status}\n`;
         } else {
           msg += "🔴 **Servidor Offline**\n";
           msg += `Erro: ${status.error}\n`;
         }
 
-        const modsInfoRaw = await listMods();
-        const modsList = modsInfoRaw
-          .split("\n")
-          .map(x => x.trim())
-          .filter(Boolean)
-          .sort();
-        const modsInfoPath = `${os.tmpdir()}/mods-info.txt`;
-        await fs.promises.writeFile(modsInfoPath, modsList.join("\n"));
-
         return interaction.editReply({
-          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}📁 **Mods instalados (${modsList.length})**`,
-          files: [new AttachmentBuilder(modsInfoPath, { name: "mods-info.txt" })],
+          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}`,
         });
 
       case "restart":
