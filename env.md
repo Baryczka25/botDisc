@@ -17,5 +17,5 @@ RCON_PASS=buhter
 # Pterodactyl (opcional)
 PTERO_PANEL_URL=https://painel.enxadahost.com/api/client
 PTERO_API_KEY=ptlc_6Qhizdt7GtYLca4FblIP2Y9Ltx7nq4equbuiERLduxr
-PTERO_SERVER_ID=f75839cd
+PTERO_SERVER_ID=f75839cd-404d-46bd-b0e9-932e21bd0bd8
 
