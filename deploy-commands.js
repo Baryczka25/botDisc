@@ -5,15 +5,15 @@ dotenv.config();
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 const commands = [
-  { name: "ping", description: "Testa se o bot está online" },
-  { name: "listmods", description: "Lista os mods instalados no servidor" },
+  { name: "ping", description: "Testa o bot" },
+  { name: "listmods", description: "Lista mods instalados" },
   {
     name: "adicionarmod",
-    description: "Envia um mod .jar para a pasta mods (com curadoria e cooldown)",
+    description: "Envia um mod .jar (com curadoria e cooldown)",
     options: [
       {
         name: "arquivo",
-        description: "Envie o arquivo .jar do mod",
+        description: "Arquivo .jar do mod",
         type: 11, // ATTACHMENT
         required: true
       }
@@ -25,15 +25,18 @@ const commands = [
     options: [
       {
         name: "nome",
-        description: "Nome exato do mod (exemplo: mod.jar)",
+        description: "Nome exato do mod (ex: mod.jar)",
         type: 3, // STRING
         required: true
       }
     ]
   },
-  { name: "historico", description: "Mostra o histórico de uploads de mods (apenas administradores)" },
-  { name: "info", description: "Mostra informações do servidor (status, mods, etc)" },
-  { name: "restart", description: "Reinicia o servidor de Minecraft da EnxadaHost" },
+  {
+    name: "historico",
+    description: "Lista histórico de uploads (apenas admins)"
+  },
+  { name: "info", description: "Mostra informações gerais do servidor" },
+  { name: "restart", description: "Reinicia o servidor" },
   { name: "help", description: "Mostra todos os comandos disponíveis" }
 ];
 
@@ -41,7 +44,7 @@ const commands = [
   try {
     console.log("Registrando comandos...");
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    console.log("Comandos registrados!");
+    console.log("✅ Comandos registrados!");
   } catch (err) {
     console.error(err);
   }
