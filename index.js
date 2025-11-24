@@ -30,7 +30,7 @@ async function ensureSFTP() {
 // Lista mods
 async function listMods() {
   await ensureSFTP();
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
   try {
     const files = await sftp.list(modsPath);
     if (!files || files.length === 0) return "Nenhum mod encontrado";
@@ -59,7 +59,7 @@ async function uploadMod(file) {
 
 // Remove mod
 async function removeMod(filename) {
-  const modsPath = process.env.SFTP_MODS_PATH || "/home/minecraft/mgt/mods";
+  const modsPath = process.env.SFTP_MODS_PATH || "/home/container/mods";
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
 
   await ensureSFTP();
