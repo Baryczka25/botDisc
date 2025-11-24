@@ -4,8 +4,9 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "discord.js": "^14.15.2",
-    "dotenv": "^16.4.5",
+    "@octokit/rest": "^22.0.1",
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1",
     "node-fetch": "^3.3.2",
     "node-ssh": "^13.1.0",
     "rcon-client": "^4.2.3",
