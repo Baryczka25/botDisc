@@ -16,7 +16,7 @@ const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 const allowedMods = ["examplemod", "forge", "fabric"];
 
 // ======================= GITHUB =======================
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const octokit = new Octokit({ auth: process.env.MGT_ID });
 const GITHUB_OWNER = process.env.MGT_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_PATH = process.env.GITHUB_PATH || "mods";
