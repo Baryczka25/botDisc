@@ -16,8 +16,8 @@ const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 const allowedMods = ["examplemod", "forge", "fabric"];
 
 // ======================= GITHUB =======================
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const GITHUB_OWNER = process.env.GITHUB_OWNER;
+const octokit = new Octokit({ auth: process.env.MGT_ID });
+const GITHUB_OWNER = process.env.MGT_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_PATH = process.env.GITHUB_PATH || "mods";
 
@@ -27,7 +27,7 @@ async function uploadToGitHub(file) {
   const contentBase64 = buffer.toString("base64");
 
   await octokit.repos.createOrUpdateFileContents({
-    owner: GITHUB_OWNER,
+    owner: MGT_OWNER,
     repo: GITHUB_REPO,
     path: `${GITHUB_PATH}/${file.name}`,
     message: `Adicionado mod ${file.name} via bot`,
