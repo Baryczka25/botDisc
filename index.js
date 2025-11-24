@@ -16,7 +16,7 @@ const sftp = new SFTPClient();
 
 // Conecta no servidor SFTP
 async function ensureSFTP() {
-  if (!sftp.sftp) {
+  if (!sftp._sshClient) {
     await sftp.connect({
       host: process.env.SFTP_HOST,
       port: Number(process.env.SFTP_PORT) || 22,
@@ -46,16 +46,16 @@ async function listMods() {
 async function uploadMod(file) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const tempPath = `${os.tmpdir()}/${file.name}`;
-  const response = await fetch(file.url);
-  const buffer = Buffer.from(await response.arrayBuffer());
+
+  // DOWNLOAD CORRETO DO ARQUIVO DO DISCORD
+  const res = await fetch(file.url, {
+    headers: { "User-Agent": "DiscordBot (NodeJS)" }
+  });
+  const buffer = Buffer.from(await res.arrayBuffer());
   await fs.promises.writeFile(tempPath, buffer);
 
   await ensureSFTP();
-  try {
-    await sftp.put(tempPath, `${modsPath}/${file.name}`);
-  } catch (err) {
-    throw new Error(`Falha ao enviar o mod: ${err.message}`);
-  }
+  await sftp.put(tempPath, `${modsPath}/${file.name}`);
 }
 
 // Remove mod
@@ -64,13 +64,9 @@ async function removeMod(filename) {
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
 
   await ensureSFTP();
-  try {
-    await sftp.delete(`${modsPath}/${sanitized}`);
-    return sanitized;
-  } catch (err) {
-    console.error(`Erro ao remover ${sanitized}:`, err.message);
-    throw new Error(`Não foi possível remover ${sanitized}: ${err.message}`);
-  }
+  await sftp.delete(`${modsPath}/${sanitized}`);
+
+  return sanitized;
 }
 
 // ======================= STATUS DO SERVIDOR VIA RCON =======================
@@ -110,6 +106,7 @@ client.on("interactionCreate", async interaction => {
 
   try {
     switch (interaction.commandName) {
+
       case "ping":
         return interaction.reply("🏓 Pong!");
 
@@ -117,38 +114,30 @@ client.on("interactionCreate", async interaction => {
         await interaction.reply("🔍 Listando mods...");
 
         const modsListRaw = await listMods();
-        const modsArray = modsListRaw
-          .split("\n")
-          .map(name => name.trim())
-          .filter(name => name)
-          .map(name => name.replace(/\.jar$/i, ""))
-          .sort();
+        const arr = modsListRaw.split("\n").filter(Boolean).sort();
+        const tempPath = `${os.tmpdir()}/mods-list.txt`;
 
-        const cleanedList = modsArray.join("\n");
-        const tempFile = `${os.tmpdir()}/mods-list.txt`;
-        await fs.promises.writeFile(tempFile, cleanedList);
-
-        const attachment = new AttachmentBuilder(tempFile, {
-          name: "mods-list.txt",
-        });
+        await fs.promises.writeFile(tempPath, arr.join("\n"));
 
         return interaction.editReply({
-          content: `📦 **Lista de mods (${modsArray.length})**`,
-          files: [attachment],
+          content: `📦 **Lista de mods (${arr.length})**`,
+          files: [new AttachmentBuilder(fs.readFileSync(tempPath), { name: "mods-list.txt" })],
         });
 
       case "uploadmod":
         const file = interaction.options.getAttachment("arquivo");
         if (!file.name.endsWith(".jar"))
-          return interaction.reply("❌ Apenas arquivos `.jar` são permitidos.");
+          return interaction.reply("❌ Apenas arquivos `.jar`.");
+
         await interaction.reply("📤 Enviando mod...");
         await uploadMod(file);
+
         return interaction.editReply(`✅ Mod **${file.name}** enviado com sucesso!`);
 
       case "removemod":
-        const name = interaction.options.getString("nome");
         await interaction.reply("🗑 Removendo mod...");
         try {
+          const name = interaction.options.getString("nome");
           const removed = await removeMod(name);
           return interaction.editReply(`✅ Mod **${removed}** removido!`);
         } catch (err) {
@@ -172,48 +161,31 @@ client.on("interactionCreate", async interaction => {
           msg += `Erro: ${status.error}\n\n`;
         }
 
-        const modsInfoRaw = await listMods();
-        const modsInfoArray = modsInfoRaw
-          .split("\n")
-          .map(name => name.trim())
-          .filter(name => name)
-          .map(name => name.replace(/\.jar$/i, ""))
-          .sort();
-
-        const modsFileContent = modsInfoArray.join("\n");
-        const tempInfoFile = `${os.tmpdir()}/mods-info.txt`;
-        await fs.promises.writeFile(tempInfoFile, modsFileContent);
-
-        const infoAttachment = new AttachmentBuilder(tempInfoFile, {
-          name: "mods-info.txt",
-        });
+        const mods = (await listMods()).split("\n").filter(Boolean).sort();
+        const path2 = `${os.tmpdir()}/mods-info.txt`;
+        await fs.promises.writeFile(path2, mods.join("\n"));
 
         return interaction.editReply({
-          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}📁 **Mods instalados (${modsInfoArray.length})**`,
-          files: [infoAttachment],
+          content: `**ℹ️ STATUS DO SERVIDOR**\n\n${msg}📁 **Mods instalados (${mods.length})**`,
+          files: [new AttachmentBuilder(fs.readFileSync(path2), { name: "mods-info.txt" })],
         });
 
       case "help":
         return interaction.reply({
           content:
-            "📘 **Lista de comandos:**\n\n" +
-            "• `/ping` — Testa o bot\n" +
-            "• `/listmods` — Lista mods instalados\n" +
-            "• `/uploadmod` — Enviar mod (.jar)\n" +
-            "• `/removemod` — Remover mod\n" +
-            "• `/info` — Informações gerais\n" +
-            "• `/help` — Ajuda",
+            "📘 **Comandos:**\n\n" +
+            "• `/ping`\n" +
+            "• `/listmods`\n" +
+            "• `/uploadmod`\n" +
+            "• `/removemod`\n" +
+            "• `/info`\n" +
+            "• `/help`",
           ephemeral: true,
         });
-
-      default:
-        return interaction.reply("❌ Comando desconhecido.");
     }
   } catch (err) {
     console.error(err);
-    return interaction.editReply(
-      `❌ Ocorreu um erro:\n\`\`\`\n${err.message}\n\`\`\``
-    );
+    return interaction.editReply(`❌ Erro:\n\`\`\`${err.message}\`\`\``);
   }
 });
 
