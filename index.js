@@ -24,19 +24,42 @@ const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_PATH = process.env.GITHUB_PATH || "mods";
 
 async function uploadToGitHub(file) {
+  const fullPath = `${GITHUB_PATH}/${file.name}`;
+
+  // Baixar o arquivo enviado pelo Discord
   const response = await fetch(file.url);
   const buffer = Buffer.from(await response.arrayBuffer());
   const contentBase64 = buffer.toString("base64");
 
+  let sha = null;
+
+  // ===== 1. Verificar se o arquivo já existe =====
+  try {
+    const existing = await octokit.repos.getContent({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: fullPath,
+    });
+
+    if (existing && existing.data && existing.data.sha) {
+      sha = existing.data.sha; // arquivo já existe → atualizar
+      console.log(`🔄 Atualizando arquivo existente no GitHub: ${file.name}`);
+    }
+  } catch (err) {
+    console.log(`📄 Arquivo não existe no GitHub, criando novo: ${file.name}`);
+  }
+
+  // ===== 2. Criar ou atualizar =====
   await octokit.repos.createOrUpdateFileContents({
     owner: GITHUB_OWNER,
     repo: GITHUB_REPO,
-    path: `${GITHUB_PATH}/${file.name}`,
-    message: `Adicionado mod ${file.name} via bot`,
+    path: fullPath,
+    message: `Adicionado/Atualizado mod ${file.name} via bot`,
     content: contentBase64,
+    sha: sha ?? undefined, // só manda sha se existir
   });
 
-  console.log(`✅ Mod ${file.name} enviado para GitHub!`);
+  console.log(`✅ Upload GitHub: ${file.name}`);
 }
 
 async function removeFromGitHub(filename) {
