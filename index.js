@@ -402,3 +402,4 @@ client.on("interactionCreate", async interaction => {
 // ======================= LOGIN =======================
 client.once("ready", () => console.log("🤖 Bot online!"));
 client.login(process.env.DISCORD_TOKEN);
+
