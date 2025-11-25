@@ -242,13 +242,13 @@ async function uploadModCurated(interaction, file) {
   }
 
   // ======= CHECAR MOD PERMITIDO =======
-  const fileNameLower = file.name.toLowerCase();
-  const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
-  if (!allowed) {
-    return interaction.editReply(
-      `❌ Mod **${file.name}** não está na lista de mods permitidos.`
-    );
-  }
+  //const fileNameLower = file.name.toLowerCase();
+  //const allowed = allowedMods.some(keyword => fileNameLower.includes(keyword));
+  //if (!allowed) {
+    //return interaction.editReply(
+      //`❌ Mod **${file.name}** não está na lista de mods permitidos.`
+    //);
+  //}
 
   // ======= UPLOAD =======
   await uploadMod(file);
