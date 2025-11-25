@@ -57,6 +57,10 @@ const commands = [
     description: "Reinicia o servidor de Minecraft"
   },
   {
+  name: "modpack",
+  description: "Baixe o modpack completo do servidor (GitHub)"
+  },
+  {
     name: "help",
     description: "Mostra todos os comandos disponíveis"
   }
