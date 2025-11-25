@@ -89,8 +89,7 @@ async function listMods() {
   await ensureSFTP();
   const path = process.env.SFTP_MODS_PATH || "mods";
   const files = await sftp.list(path);
-  return files.map(f => f.name).join("
-");
+  return files.map(f => f.name).join("");
 }
 
 async function uploadMod(file) {
