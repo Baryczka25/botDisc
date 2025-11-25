@@ -342,8 +342,9 @@ client.on("interactionCreate", async interaction => {
         return uploadModCurated(interaction, file);
 
       case "removermod":
-        const name = interaction.options.getString("nome");
-        return removeModFull(interaction, name);
+          const name = interaction.options.getString("nome");
+          await interaction.deferReply(); // <-- NECESSÁRIO
+          return removeModFull(interaction, name);
 
       case "historico": await listUploadHistory(interaction); break;
 
