@@ -89,7 +89,8 @@ async function listMods() {
   await ensureSFTP();
   const path = process.env.SFTP_MODS_PATH || "mods";
   const files = await sftp.list(path);
-  return files.map(f => f.name).join("\n");
+  return files.map(f => f.name).join("
+");
 }
 
 async function uploadMod(file) {
@@ -189,7 +190,8 @@ async function uploadModCurated(interaction, file) {
   registerUpload(interaction.user.id, interaction.user.username, file.name);
   await sendCommandPtero(`say Novo mod carregado: ${file.name}`);
   const restartMsg = await restartServerPtero();
-  return interaction.editReply(`✅ Mod **${file.name}** enviado!\n${restartMsg}`);
+  return interaction.editReply(`✅ Mod **${file.name}** enviado!
+${restartMsg}`);
 }
 
 // ======================= REMOVER MOD =======================
@@ -203,9 +205,12 @@ async function removeModFull(interaction, filename) {
     await sendCommandPtero(`say Mod removido: ${removed}`);
     const restartMsg = await restartServerPtero();
 
-    return interaction.editReply(`✅ Mod **${removed}** removido!\n${restartMsg}`);
+    return interaction.editReply(`✅ Mod **${removed}** removido!
+${restartMsg}`);
   } catch (e) {
-    return interaction.editReply(`❌ Erro ao remover mod:\n\n${e.message}`);
+    return interaction.editReply(`❌ Erro ao remover mod:
+
+${e.message}`);
   }
 }
 
@@ -244,7 +249,8 @@ client.on("interactionCreate", async interaction => {
         return interaction.reply("❌ Comando desconhecido.");
     }
   } catch (e) {
-    return interaction.editReply(`❌ Erro:\n${e.message}`);
+    return interaction.editReply(`❌ Erro:
+${e.message}`);
   }
 });
 
