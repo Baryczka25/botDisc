@@ -364,6 +364,16 @@ client.on("interactionCreate", async interaction => {
         const restartMsg = await restartServerPtero();
         return interaction.editReply(restartMsg);
 
+      case "modpack":
+        await interaction.reply(
+          "📥 **Modpack do servidor (GitHub):**\n" +
+          "🔗 Clone via Git:\n" +
+          "`git clone https://github.com/Baryczka25/MGT-Server.git`\n\n" +
+          "📦 Ou baixe o ZIP da branch main:\n" +
+          "https://github.com/Baryczka25/MGT-Server/archive/refs/heads/main.zip"
+        );
+        break;  
+
       case "help":
         return interaction.reply({
           content:
@@ -375,9 +385,11 @@ client.on("interactionCreate", async interaction => {
             "• `/historico` — Lista histórico de uploads (admin)\n" +
             "• `/info` — Informações gerais\n" +
             "• `/restart` — Reinicia o servidor\n" +
+            "• `/modpack` — Link para baixar o modpack (GitHub)\n" +
             "• `/help` — Ajuda",
           ephemeral: true,
         });
+
 
       default: return interaction.reply("❌ Comando desconhecido.");
     }
