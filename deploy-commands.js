@@ -2,15 +2,15 @@ import { REST, Routes } from "discord.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-// ===== VERIFICAÇÃO =====
+// ===== VERIFICAÇÃO DE TOKEN =====
 if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID) {
-  console.error("❌ DISCORD_TOKEN ou CLIENT_ID ausente no .env");
+  console.error("❌ DISCORD_TOKEN ou CLIENT_ID não definido no .env");
   process.exit(1);
 }
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
-// === COMANDOS ===
+// ===== COMANDOS =====
 const commands = [
   {
     name: "ping",
@@ -22,12 +22,12 @@ const commands = [
   },
   {
     name: "adicionarmod",
-    description: "Envia um mod .jar",
+    description: "Envia um mod .jar (com curadoria e cooldown)",
     options: [
       {
         name: "arquivo",
         description: "Envie o arquivo .jar do mod",
-        type: 11,
+        type: 11, // Attachment
         required: true
       }
     ]
@@ -38,24 +38,35 @@ const commands = [
     options: [
       {
         name: "nome",
-        description: "Nome do mod",
-        type: 3,
-        required: true,
-        autocomplete: true
+        description: "Nome exato do mod (ex: mod.jar)",
+        type: 3, // String
+        required: true
       }
     ]
   },
   {
-    name: "painel",
-    description: "Exibe o painel de gerenciamento"
+    name: "historico",
+    description: "Lista histórico de uploads (apenas admin)"
+  },
+  {
+    name: "info",
+    description: "Mostra informações do servidor (status, mods, etc)"
+  },
+  {
+    name: "restart",
+    description: "Reinicia o servidor de Minecraft"
+  },
+  {
+  name: "modpack",
+  description: "Baixe o modpack completo do servidor (GitHub)"
   },
   {
     name: "help",
-    description: "Mostra todos os comandos"
+    description: "Mostra todos os comandos disponíveis"
   }
 ];
 
-// ===== REGISTRAR =====
+// ===== REGISTRO =====
 (async () => {
   try {
     console.log("Registrando comandos...");
