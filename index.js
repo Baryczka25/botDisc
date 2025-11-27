@@ -6,7 +6,8 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder
+  EmbedBuilder,
+  PermissionFlagsBits,
 } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
@@ -19,74 +20,73 @@ dotenv.config();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// ======================= CONFIGURAÇÕES =======================
+// ========== CONFIGURAÇÃO (tuneável) ==========
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
-const allowedMods = ["examplemod", "forge", "fabric"];
-const uploadCooldowns = new Map();
-const pendingApprovals = new Map(); // <= AQUI
-const uploadHistory = [];
+const allowedMods = ["examplemod", "forge", "fabric"]; // palavras-chave permitidas
+const uploadCooldowns = new Map(); // userId -> timestamp
+const uploadHistory = []; // histórico simples
+const pendingApprovals = new Map(); // messageId -> { file, uploader }
 
-// ======================= GITHUB =======================
+// ========== GITHUB ==========
 const octokit = new Octokit({ auth: process.env.MGT_ID });
 const GITHUB_OWNER = process.env.MGT_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_PATH = process.env.GITHUB_PATH || "mods";
 
+// upload/update file to GitHub
 async function uploadToGitHub(file) {
   const fullPath = `${GITHUB_PATH}/${file.name}`;
+  const res = await fetch(file.url);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const content = buf.toString("base64");
 
-  const response = await fetch(file.url);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const contentBase64 = buffer.toString("base64");
-
-  let sha = null;
-
+  let sha;
   try {
     const existing = await octokit.repos.getContent({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       path: fullPath,
     });
-    sha = existing.data.sha;
-  } catch {}
+    if (existing && existing.data && existing.data.sha) sha = existing.data.sha;
+  } catch (e) {
+    // não existe, segue
+  }
 
   await octokit.repos.createOrUpdateFileContents({
     owner: GITHUB_OWNER,
     repo: GITHUB_REPO,
     path: fullPath,
     message: `Adicionado/Atualizado mod ${file.name} via bot`,
-    content: contentBase64,
+    content,
     sha: sha ?? undefined,
   });
 }
 
+// remove file from GitHub
 async function removeFromGitHub(filename) {
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
-
   try {
-    const { data: fileData } = await octokit.repos.getContent({
+    const { data } = await octokit.repos.getContent({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       path: `${GITHUB_PATH}/${sanitized}`,
     });
-
+    const sha = data.sha;
     await octokit.repos.deleteFile({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       path: `${GITHUB_PATH}/${sanitized}`,
       message: `Removido mod ${sanitized} via bot`,
-      sha: fileData.sha,
+      sha,
     });
-
-    console.log(`✅ Removido do GitHub: ${sanitized}`);
+    return sanitized;
   } catch (err) {
-    console.log("Erro ao remover GitHub:", err.message);
+    throw new Error(`GitHub: ${err.message}`);
   }
 }
 
-// ======================= SFTP =======================
+// ========== SFTP ==========
 const sftp = new SFTPClient();
-
 async function ensureSFTP() {
   try {
     await sftp.list("/");
@@ -106,35 +106,31 @@ async function listModsRaw() {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   return await sftp.list(modsPath);
 }
-
 async function listMods() {
   const raw = await listModsRaw();
   return raw.map((m) => m.name);
 }
 
-async function uploadMod(file) {
+async function uploadModToSFTP(file) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const tempPath = `${os.tmpdir()}/${file.name}`;
-
-  const response = await fetch(file.url);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await fs.promises.writeFile(tempPath, buffer);
-
+  const res = await fetch(file.url);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await fs.promises.writeFile(tempPath, buf);
   await ensureSFTP();
   await sftp.put(tempPath, `${modsPath}/${file.name}`);
+  try { await fs.promises.unlink(tempPath); } catch {}
 }
 
 async function removeModSFTP(filename) {
   const modsPath = process.env.SFTP_MODS_PATH || "mods";
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
-
   await ensureSFTP();
   await sftp.delete(`${modsPath}/${sanitized}`);
-
   return sanitized;
 }
 
-// ======================= PTERODACTYL =======================
+// ========== PTERODACTYL ==========
 async function getServerStatusPtero() {
   try {
     const res = await fetch(
@@ -144,13 +140,10 @@ async function getServerStatusPtero() {
         headers: {
           Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
           "Content-Type": "application/json",
-          Accept: "application/json",
         },
       }
     );
-
     const data = await res.json();
-
     return {
       online: data.attributes.current_state === "running",
       cpu: data.attributes.resources.cpu_absolute,
@@ -165,18 +158,14 @@ async function getServerStatusPtero() {
 
 async function restartServerPtero() {
   try {
-    await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ signal: "restart" }),
-      }
-    );
+    await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ signal: "restart" }),
+    });
     return "🔄 Servidor reiniciado!";
   } catch (err) {
     return `Erro: ${err.message}`;
@@ -185,209 +174,287 @@ async function restartServerPtero() {
 
 async function sendCommandPtero(command) {
   try {
-    await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ command }),
-      }
-    );
+    await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command }),
+    });
     return true;
   } catch {
     return false;
   }
 }
 
-// ======================= PEDIR APROVAÇÃO =======================
-async function pedirAprovacao(interaction, file) {
-  const embed = new EmbedBuilder()
-    .setTitle("⚠️ Aprovar mod?")
-    .setDescription(`O mod **${file.name}** não está na lista de mods permitidos.\nDeseja aprovar o envio?`)
-    .setColor("Yellow");
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`aprovar_${interaction.id}`)
-      .setLabel("✔️ Aprovar")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
-      .setCustomId(`rejeitar_${interaction.id}`)
-      .setLabel("❌ Rejeitar")
-      .setStyle(ButtonStyle.Danger)
-  );
-
-  pendingApprovals.set(interaction.id, { interaction, file });
-
-  return interaction.editReply({ embeds: [embed], components: [row] });
+// ========== UPLOADS / APROVAÇÃO ==========
+function registerUpload(userId, username, fileName) {
+  uploadHistory.push({ userId, username, fileName, timestamp: Date.now() });
 }
 
-// ======================= UPLOAD CURADO =======================
-async function uploadModCurated(interaction, file) {
-  const userId = interaction.user.id;
-
-  const now = Date.now();
-  if (uploadCooldowns.has(userId)) {
-    const diff = now - uploadCooldowns.get(userId);
-    if (diff < COOLDOWN_TIME) {
-      return interaction.editReply("⏱ Aguarde para enviar outro mod.");
-    }
-  }
-
-  const ok = allowedMods.some((k) => file.name.toLowerCase().includes(k));
-  if (!ok) return pedirAprovacao(interaction, file);
-
-  return realizarUpload(interaction, file);
-}
-
-async function realizarUpload(interaction, file) {
-  const userId = interaction.user.id;
-  const now = Date.now();
-
-  await uploadMod(file);
+async function realizarUploadCompleto(file, uploaderId) {
+  // faz SFTP + GitHub
+  await uploadModToSFTP(file);
   await uploadToGitHub(file);
-
-  uploadCooldowns.set(userId, now);
-
+  registerUpload(uploaderId, String(uploaderId), file.name);
   await sendCommandPtero(`say Novo mod adicionado: ${file.name}`);
   const restartMsg = await restartServerPtero();
-
-  return interaction.editReply(`✅ Mod enviado!\n${restartMsg}`);
+  return restartMsg;
 }
 
-// ======================= BOTÕES DE APROVAÇÃO =======================
+// função usada quando mod não está em allowed -> cria mensagem de aprovação no canal de moderação
+async function pedirAprovacao(interaction, file) {
+  // responder imediatamente ao autor que pedido foi criado
+  await interaction.editReply({
+    content: `📨 Pedido de aprovação enviado para revisores. Você será notificado aqui quando aprovado ou rejeitado.`,
+  }).catch(() => { /* ignore */ });
+
+  const modChannelId = process.env.MOD_APPROVAL_CHANNEL;
+  if (!modChannelId) {
+    // fallback: informe que não há canal configurado
+    return interaction.followUp({ content: "❌ Canal de aprovação não configurado.", ephemeral: true });
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle("📢 Pedido de aprovação de mod")
+    .addFields(
+      { name: "Arquivo", value: file.name, inline: false },
+      { name: "Enviado por", value: `${interaction.user.tag} (${interaction.user.id})`, inline: false },
+      { name: "Download", value: file.url ?? "Anexo não acessível", inline: false }
+    )
+    .setColor("#FFA500")
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("approve_mod").setLabel("✔️ Aprovar").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("reject_mod").setLabel("❌ Rejeitar").setStyle(ButtonStyle.Danger)
+  );
+
+  const modChannel = await client.channels.fetch(modChannelId).catch(() => null);
+  if (!modChannel || !modChannel.send) {
+    return interaction.followUp({ content: "❌ Não consegui postar o pedido no canal de aprovação.", ephemeral: true });
+  }
+
+  const msg = await modChannel.send({ embeds: [embed], components: [row] });
+  // armazenar por message.id para aprovação posterior
+  pendingApprovals.set(msg.id, { file, uploader: interaction.user, requestMessageId: interaction.id });
+  return;
+}
+
+// ========== AUTOCOMPLETE ==========
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  // ====== APROVAR ======
-  if (interaction.customId.startsWith("aprovar_")) {
-    const id = interaction.customId.replace("aprovar_", "");
-    const data = pendingApprovals.get(id);
-    if (!data) return interaction.reply({ content: "❌ Solicitação expirada.", ephemeral: true });
-
-    pendingApprovals.delete(id);
-
-    interaction.reply({ content: "✔️ Mod aprovado!", ephemeral: true });
-    return realizarUpload(data.interaction, data.file);
-  }
-
-  // ====== REJEITAR ======
-  if (interaction.customId.startsWith("rejeitar_")) {
-    const id = interaction.customId.replace("rejeitar_", "");
-    pendingApprovals.delete(id);
-
-    return interaction.reply({ content: "❌ Mod rejeitado.", ephemeral: true });
-  }
-});
-
-// ======================= AUTOCOMPLETE removermod =======================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isAutocomplete()) return;
-
-  if (interaction.commandName === "removermod") {
-    const mods = await listMods();
-    const focused = interaction.options.getFocused();
-
-    const filtered = mods
-      .filter((m) => m.toLowerCase().includes(focused.toLowerCase()))
-      .slice(0, 25)
-      .map((m) => ({ name: m, value: m }));
-
-    await interaction.respond(filtered);
-  }
-});
-
-// ======================= PAINEL =======================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  if (interaction.customId === "painel_listar") {
-    const mods = await listMods();
-    return interaction.reply({
-      content: mods.length ? mods.join("\n") : "Nenhum mod.",
-      ephemeral: true,
-    });
-  }
-
-  if (interaction.customId === "painel_restart") {
-    const msg = await restartServerPtero();
-    return interaction.reply({ content: msg, ephemeral: true });
-  }
-
-  if (interaction.customId === "painel_info") {
-    const status = await getServerStatusPtero();
-    return interaction.reply({
-      content: JSON.stringify(status, null, 2),
-      ephemeral: true,
-    });
-  }
-});
-
-// ======================= HANDLER COMANDOS =======================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
-    switch (interaction.commandName) {
-      case "ping":
-        return interaction.reply("Pong!");
-
-      case "listmods":
+    if (interaction.isAutocomplete()) {
+      if (interaction.commandName === "removermod") {
+        const focused = interaction.options.getFocused();
         const mods = await listMods();
-        return interaction.reply(mods.join("\n"));
+        const filtered = mods
+          .filter((m) => m.toLowerCase().includes(String(focused).toLowerCase()))
+          .slice(0, 25)
+          .map((m) => ({ name: m, value: m }));
+        await interaction.respond(filtered);
+      }
+      return;
+    }
 
-      case "adicionarmod":
-        const file = interaction.options.getAttachment("arquivo");
-        if (!file.name.endsWith(".jar"))
-          return interaction.reply("❌ Envie .jar");
-        await interaction.reply("📤 Enviando...");
-        return uploadModCurated(interaction, file);
+    // ========== BOTÕES ==========
+    if (interaction.isButton()) {
+      // autorização: só moderadores? aqui só quem clicar
+      // botão do painel genérico
+      if (interaction.customId === "painel_listar") {
+        const mods = await listMods();
+        return interaction.reply({ content: mods.length ? mods.join("\n") : "Nenhum mod.", ephemeral: true });
+      }
+      if (interaction.customId === "painel_restart") {
+        const msg = await restartServerPtero();
+        return interaction.reply({ content: msg, ephemeral: true });
+      }
+      if (interaction.customId === "painel_info") {
+        const status = await getServerStatusPtero();
+        const pretty = status.online
+          ? `🟢 Online — CPU ${status.cpu}% — Mem ${Math.round(status.memory / 1024 / 1024)} MB`
+          : `🔴 Offline — ${status.error || "erro desconhecido"}`;
+        return interaction.reply({ content: pretty, ephemeral: true });
+      }
 
-      case "removermod":
-        const name = interaction.options.getString("nome");
+      // ===== aprovação de mod (no canal de moderação) =====
+      if (interaction.customId === "approve_mod" || interaction.customId === "reject_mod") {
+        // garantir permissão mínima (MANAGE_GUILD ou permissões administrativas) - opcional
+        const member = interaction.member;
+        const isMod = member?.permissions?.has?.(PermissionFlagsBits.ManageGuild) || member?.permissions?.has?.(PermissionFlagsBits.Administrator);
+        if (!isMod) {
+          return interaction.reply({ content: "❌ Você não tem permissão para moderar.", ephemeral: true });
+        }
+
+        const msgId = interaction.message.id;
+        const pending = pendingApprovals.get(msgId);
+        if (!pending) return interaction.reply({ content: "❌ Pedido expirado ou não encontrado.", ephemeral: true });
+
+        pendingApprovals.delete(msgId);
+        if (interaction.customId === "reject_mod") {
+          // notificar uploader
+          const uploader = pending.uploader;
+          try {
+            await uploader.send(`❌ Seu mod **${pending.file.name}** foi rejeitado pelos moderadores.`);
+          } catch {}
+          await interaction.update({ content: "❌ Mod rejeitado.", embeds: [], components: [] });
+          return;
+        }
+
+        // aprovar
+        await interaction.update({ content: "✔️ Mod aprovado — processando upload...", embeds: [], components: [] });
+        try {
+          const restartMsg = await realizarUploadCompleto(pending.file, pending.uploader.id);
+          // notificar uploader
+          try {
+            await pending.uploader.send(`✔️ Seu mod **${pending.file.name}** foi aprovado e enviado.\n${restartMsg}`);
+          } catch {}
+          // log no canal de logs, se configurado
+          const logChannelId = process.env.DISCORD_LOG_CHANNEL;
+          if (logChannelId) {
+            const log = await client.channels.fetch(logChannelId).catch(() => null);
+            if (log && log.send) {
+              await log.send(`📥 Mod aprovado e enviado: **${pending.file.name}** (por ${pending.uploader.tag || pending.uploader.id})`);
+            }
+          }
+        } catch (e) {
+          await interaction.followUp({ content: `❌ Falha no upload: ${e.message}`, ephemeral: true });
+        }
+        return;
+      }
+
+      return;
+    }
+
+    // ========== COMANDOS ==========
+    if (interaction.isChatInputCommand()) {
+      const name = interaction.commandName;
+
+      // --- ping ---
+      if (name === "ping") return interaction.reply({ content: "🏓 Pong!", ephemeral: true });
+
+      // --- listmods ---
+      if (name === "listmods") {
         await interaction.deferReply();
-        await removeFromGitHub(name);
-        const removed = await removeModSFTP(name);
-        return interaction.editReply(`🗑 Removido: ${removed}`);
+        const mods = await listMods();
+        const text = mods.length ? mods.join("\n") : "Nenhum mod";
+        const filePath = `${os.tmpdir()}/mods-list.txt`;
+        await fs.promises.writeFile(filePath, text);
+        return interaction.editReply({ content: `📦 Mods instalados: ${mods.length}`, files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })] });
+      }
 
-      case "painel": {
+      // --- adicionarmod ---
+      if (name === "adicionarmod") {
+        const file = interaction.options.getAttachment("arquivo");
+        if (!file || !file.name.endsWith(".jar")) return interaction.reply({ content: "❌ Envie um arquivo .jar", ephemeral: true });
+        await interaction.reply({ content: "📤 Recebido — processando...", ephemeral: true });
+
+        // cooldown
+        const userId = interaction.user.id;
+        const now = Date.now();
+        if (uploadCooldowns.has(userId) && now - uploadCooldowns.get(userId) < COOLDOWN_TIME) {
+          return interaction.editReply({ content: "⏱ Aguarde antes de enviar outro mod.", ephemeral: true });
+        }
+
+        const ok = allowedMods.some(k => file.name.toLowerCase().includes(k));
+        if (!ok) {
+          // criar pedido de aprovação no canal de moderação
+          return pedirAprovacao(interaction, file);
+        }
+
+        // upload direto
+        try {
+          const restartMsg = await realizarUploadCompleto(file, userId);
+          uploadCooldowns.set(userId, Date.now());
+          return interaction.editReply({ content: `✅ Mod enviado!\n${restartMsg}`, ephemeral: true });
+        } catch (e) {
+          return interaction.editReply({ content: `❌ Erro no upload: ${e.message}`, ephemeral: true });
+        }
+      }
+
+      // --- removermod ---
+      if (name === "removermod") {
+        const filename = interaction.options.getString("nome");
+        if (!filename) return interaction.reply({ content: "❌ Informe o nome do mod.", ephemeral: true });
+        await interaction.reply({ content: "🗑 Removendo...", ephemeral: true });
+
+        try {
+          await removeFromGitHub(filename);
+        } catch (e) {
+          // fail but maybe SFTP still remove; propagate message
+          console.error("GitHub remove error:", e.message);
+        }
+
+        try {
+          const removed = await removeModSFTP(filename);
+          await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: true });
+          // notify server
+          await sendCommandPtero(`say Mod removido: ${removed}`);
+          await restartServerPtero();
+        } catch (e) {
+          return interaction.editReply({ content: `❌ Erro ao remover: ${e.message}`, ephemeral: true });
+        }
+        return;
+      }
+
+      // --- painel (embed + botões) ---
+      if (name === "painel") {
         const embed = new EmbedBuilder()
           .setTitle("⚙️ Painel de Gerenciamento")
-          .setDescription("Gerencie o servidor usando os botões abaixo")
+          .setDescription("Gerencie o servidor com os botões abaixo")
           .setColor("#5865F2");
 
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("painel_listar")
-            .setLabel("📦 Listar Mods")
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId("painel_restart")
-            .setLabel("🔄 Reiniciar")
-            .setStyle(ButtonStyle.Danger),
-          new ButtonBuilder()
-            .setCustomId("painel_info")
-            .setLabel("ℹ️ Info")
-            .setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId("painel_listar").setLabel("📦 Listar Mods").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("painel_restart").setLabel("🔄 Reiniciar").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId("painel_info").setLabel("ℹ️ Info").setStyle(ButtonStyle.Secondary)
         );
 
-        return interaction.reply({ embeds: [embed], components: [row] });
+        return interaction.reply({ embeds: [embed], components: [row], ephemeral: false });
       }
 
-      default:
-        return interaction.reply("Comando desconhecido.");
-    }
+      // --- info ---
+      if (name === "info") {
+        await interaction.deferReply({ ephemeral: true });
+        const status = await getServerStatusPtero();
+        const text = status.online
+          ? `🟢 Online\nCPU: ${status.cpu}%\nMem: ${Math.round(status.memory/1024/1024)} MB\nEstado: ${status.status}`
+          : `🔴 Offline\nErro: ${status.error}`;
+        return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, ephemeral: true });
+      }
+
+      // --- help / modpack simples ---
+      if (name === "modpack") {
+        return interaction.reply({
+          content:
+            "📥 **Modpack (GitHub)**\n`git clone https://github.com/Baryczka25/MGT-Server.git`\n\nBaixe em: https://github.com/Baryczka25/MGT-Server/archive/refs/heads/main.zip",
+          ephemeral: true,
+        });
+      }
+
+      if (name === "help") {
+        return interaction.reply({ content: "Use os comandos /listmods /adicionarmod /removermod /painel /modpack", ephemeral: true });
+      }
+
+    } // end chat command
+
   } catch (err) {
-    console.error(err);
-    return interaction.reply(`Erro: ${err.message}`);
+    console.error("Interaction handler error:", err);
+    // se for chat command tente responder
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: `❌ Erro: ${err.message}` });
+      } else {
+        await interaction.reply({ content: `❌ Erro: ${err.message}`, ephemeral: true });
+      }
+    } catch (e) {
+      // swallow
+      console.error("Failed to notify user about error:", e);
+    }
   }
 });
 
-// ======================= LOGIN =======================
+// login
 client.once("ready", () => console.log("🤖 Bot online!"));
 client.login(process.env.DISCORD_TOKEN);
