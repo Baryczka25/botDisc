@@ -23,6 +23,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 const allowedMods = ["examplemod", "forge", "fabric"];
 const uploadCooldowns = new Map();
+const pendingApprovals = new Map(); // <= AQUI
 const uploadHistory = [];
 
 // ======================= GITHUB =======================
@@ -108,7 +109,7 @@ async function listModsRaw() {
 
 async function listMods() {
   const raw = await listModsRaw();
-  return raw.map(m => m.name);
+  return raw.map((m) => m.name);
 }
 
 async function uploadMod(file) {
@@ -202,6 +203,30 @@ async function sendCommandPtero(command) {
   }
 }
 
+// ======================= PEDIR APROVAÇÃO =======================
+async function pedirAprovacao(interaction, file) {
+  const embed = new EmbedBuilder()
+    .setTitle("⚠️ Aprovar mod?")
+    .setDescription(`O mod **${file.name}** não está na lista de mods permitidos.\nDeseja aprovar o envio?`)
+    .setColor("Yellow");
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`aprovar_${interaction.id}`)
+      .setLabel("✔️ Aprovar")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId(`rejeitar_${interaction.id}`)
+      .setLabel("❌ Rejeitar")
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  pendingApprovals.set(interaction.id, { interaction, file });
+
+  return interaction.editReply({ embeds: [embed], components: [row] });
+}
+
 // ======================= UPLOAD CURADO =======================
 async function uploadModCurated(interaction, file) {
   const userId = interaction.user.id;
@@ -214,8 +239,15 @@ async function uploadModCurated(interaction, file) {
     }
   }
 
-  const ok = allowedMods.some(k => file.name.toLowerCase().includes(k));
-  if (!ok) return interaction.editReply("❌ Mod não permitido.");
+  const ok = allowedMods.some((k) => file.name.toLowerCase().includes(k));
+  if (!ok) return pedirAprovacao(interaction, file);
+
+  return realizarUpload(interaction, file);
+}
+
+async function realizarUpload(interaction, file) {
+  const userId = interaction.user.id;
+  const now = Date.now();
 
   await uploadMod(file);
   await uploadToGitHub(file);
@@ -228,6 +260,31 @@ async function uploadModCurated(interaction, file) {
   return interaction.editReply(`✅ Mod enviado!\n${restartMsg}`);
 }
 
+// ======================= BOTÕES DE APROVAÇÃO =======================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  // ====== APROVAR ======
+  if (interaction.customId.startsWith("aprovar_")) {
+    const id = interaction.customId.replace("aprovar_", "");
+    const data = pendingApprovals.get(id);
+    if (!data) return interaction.reply({ content: "❌ Solicitação expirada.", ephemeral: true });
+
+    pendingApprovals.delete(id);
+
+    interaction.reply({ content: "✔️ Mod aprovado!", ephemeral: true });
+    return realizarUpload(data.interaction, data.file);
+  }
+
+  // ====== REJEITAR ======
+  if (interaction.customId.startsWith("rejeitar_")) {
+    const id = interaction.customId.replace("rejeitar_", "");
+    pendingApprovals.delete(id);
+
+    return interaction.reply({ content: "❌ Mod rejeitado.", ephemeral: true });
+  }
+});
+
 // ======================= AUTOCOMPLETE removermod =======================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isAutocomplete()) return;
@@ -237,15 +294,15 @@ client.on("interactionCreate", async (interaction) => {
     const focused = interaction.options.getFocused();
 
     const filtered = mods
-      .filter(m => m.toLowerCase().includes(focused.toLowerCase()))
+      .filter((m) => m.toLowerCase().includes(focused.toLowerCase()))
       .slice(0, 25)
-      .map(m => ({ name: m, value: m }));
+      .map((m) => ({ name: m, value: m }));
 
     await interaction.respond(filtered);
   }
 });
 
-// ======================= BOTÕES DO PAINEL =======================
+// ======================= PAINEL =======================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -253,7 +310,7 @@ client.on("interactionCreate", async (interaction) => {
     const mods = await listMods();
     return interaction.reply({
       content: mods.length ? mods.join("\n") : "Nenhum mod.",
-      ephemeral: true
+      ephemeral: true,
     });
   }
 
@@ -266,7 +323,7 @@ client.on("interactionCreate", async (interaction) => {
     const status = await getServerStatusPtero();
     return interaction.reply({
       content: JSON.stringify(status, null, 2),
-      ephemeral: true
+      ephemeral: true,
     });
   }
 });
