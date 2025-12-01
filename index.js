@@ -22,10 +22,10 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ========== CONFIGURAÇÃO (tuneável) ==========
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
-const allowedMods = ["examplemod", "forge", "fabric"]; // palavras-chave permitidas
+// Nota: agora a checagem de "allowed" é feita por isAllowed(fileName)
 const uploadCooldowns = new Map(); // userId -> timestamp
 const uploadHistory = []; // histórico simples
-const pendingApprovals = new Map(); // messageId -> { file, uploader }
+const pendingApprovals = new Map(); // messageId -> { file, uploader, requestMessageId }
 
 // ========== GITHUB ==========
 const octokit = new Octokit({ auth: process.env.MGT_ID });
@@ -203,16 +203,37 @@ async function realizarUploadCompleto(file, uploaderId) {
   return restartMsg;
 }
 
+// ========== REGRAS DE PERMISSÃO (NEOFORGE 1.21.1 / build opcional) ==========
+function isAllowedFilename(filename) {
+  if (!filename) return false;
+  const s = filename.toLowerCase();
+  // exige 'neoforge' e '1.21.1' em qualquer ordem OR aceita string build '21.1.213'
+  if (s.includes("21.1.213")) return true;
+  return s.includes("neoforge") && s.includes("1.21.1");
+}
+
 // função usada quando mod não está em allowed -> cria mensagem de aprovação no canal de moderação
 async function pedirAprovacao(interaction, file) {
-  // responder imediatamente ao autor que pedido foi criado
-  await interaction.editReply({
-    content: `📨 Pedido de aprovação enviado para revisores. Você será notificado aqui quando aprovado ou rejeitado.`,
-  }).catch(() => { /* ignore */ });
+  // respondemos ao autor (editReply se possível, se não usamos followUp)
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({
+        content: `📨 Pedido de aprovação enviado para revisores. Você será notificado aqui quando aprovado ou rejeitado.`,
+        embeds: [],
+        components: [],
+      });
+    } else {
+      await interaction.reply({
+        content: `📨 Pedido de aprovação enviado para revisores. Você será notificado aqui quando aprovado ou rejeitado.`,
+        ephemeral: true,
+      });
+    }
+  } catch (e) {
+    // ignore
+  }
 
   const modChannelId = process.env.MOD_APPROVAL_CHANNEL;
   if (!modChannelId) {
-    // fallback: informe que não há canal configurado
     return interaction.followUp({ content: "❌ Canal de aprovação não configurado.", ephemeral: true });
   }
 
@@ -242,9 +263,10 @@ async function pedirAprovacao(interaction, file) {
   return;
 }
 
-// ========== AUTOCOMPLETE ==========
+// ========== AUTOCOMPLETE / INTERAÇÕES UNIFICADAS ==========
 client.on("interactionCreate", async (interaction) => {
   try {
+    // AUTOCOMPLETE (removermod)
     if (interaction.isAutocomplete()) {
       if (interaction.commandName === "removermod") {
         const focused = interaction.options.getFocused();
@@ -258,10 +280,9 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // ========== BOTÕES ==========
+    // BOTÕES
     if (interaction.isButton()) {
-      // autorização: só moderadores? aqui só quem clicar
-      // botão do painel genérico
+      // BOTÕES DO PAINEL
       if (interaction.customId === "painel_listar") {
         const mods = await listMods();
         return interaction.reply({ content: mods.length ? mods.join("\n") : "Nenhum mod.", ephemeral: true });
@@ -278,9 +299,9 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: pretty, ephemeral: true });
       }
 
-      // ===== aprovação de mod (no canal de moderação) =====
+      // APROVAÇÃO DE MOD (NO CANAL DE MODERAÇÃO)
       if (interaction.customId === "approve_mod" || interaction.customId === "reject_mod") {
-        // garantir permissão mínima (MANAGE_GUILD ou permissões administrativas) - opcional
+        // checar permissão
         const member = interaction.member;
         const isMod = member?.permissions?.has?.(PermissionFlagsBits.ManageGuild) || member?.permissions?.has?.(PermissionFlagsBits.Administrator);
         if (!isMod) {
@@ -295,22 +316,16 @@ client.on("interactionCreate", async (interaction) => {
         if (interaction.customId === "reject_mod") {
           // notificar uploader
           const uploader = pending.uploader;
-          try {
-            await uploader.send(`❌ Seu mod **${pending.file.name}** foi rejeitado pelos moderadores.`);
-          } catch {}
+          try { await uploader.send(`❌ Seu mod **${pending.file.name}** foi rejeitado pelos moderadores.`); } catch {}
           await interaction.update({ content: "❌ Mod rejeitado.", embeds: [], components: [] });
           return;
         }
 
-        // aprovar
+        // APPROVE
         await interaction.update({ content: "✔️ Mod aprovado — processando upload...", embeds: [], components: [] });
         try {
           const restartMsg = await realizarUploadCompleto(pending.file, pending.uploader.id);
-          // notificar uploader
-          try {
-            await pending.uploader.send(`✔️ Seu mod **${pending.file.name}** foi aprovado e enviado.\n${restartMsg}`);
-          } catch {}
-          // log no canal de logs, se configurado
+          try { await pending.uploader.send(`✔️ Seu mod **${pending.file.name}** foi aprovado e enviado.\n${restartMsg}`); } catch {}
           const logChannelId = process.env.DISCORD_LOG_CHANNEL;
           if (logChannelId) {
             const log = await client.channels.fetch(logChannelId).catch(() => null);
@@ -323,11 +338,10 @@ client.on("interactionCreate", async (interaction) => {
         }
         return;
       }
-
       return;
     }
 
-    // ========== COMANDOS ==========
+    // COMANDOS
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
 
@@ -348,6 +362,8 @@ client.on("interactionCreate", async (interaction) => {
       if (name === "adicionarmod") {
         const file = interaction.options.getAttachment("arquivo");
         if (!file || !file.name.endsWith(".jar")) return interaction.reply({ content: "❌ Envie um arquivo .jar", ephemeral: true });
+
+        // respondemos rápido para evitar timeout do Discord (e marcamos que já respondemos)
         await interaction.reply({ content: "📤 Recebido — processando...", ephemeral: true });
 
         // cooldown
@@ -357,8 +373,8 @@ client.on("interactionCreate", async (interaction) => {
           return interaction.editReply({ content: "⏱ Aguarde antes de enviar outro mod.", ephemeral: true });
         }
 
-        const ok = allowedMods.some(k => file.name.toLowerCase().includes(k));
-        if (!ok) {
+        // check allowed rule: neoforge + 1.21.1 OR build 21.1.213
+        if (!isAllowedFilename(file.name)) {
           // criar pedido de aprovação no canal de moderação
           return pedirAprovacao(interaction, file);
         }
@@ -380,13 +396,13 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({ content: "🗑 Removendo...", ephemeral: true });
 
         try {
-          await removeFromGitHub(filename);
-        } catch (e) {
-          // fail but maybe SFTP still remove; propagate message
-          console.error("GitHub remove error:", e.message);
-        }
+          try {
+            await removeFromGitHub(filename);
+          } catch (e) {
+            // loga e continua para tentar SFTP
+            console.error("GitHub remove error:", e.message);
+          }
 
-        try {
           const removed = await removeModSFTP(filename);
           await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: true });
           // notify server
@@ -424,7 +440,7 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, ephemeral: true });
       }
 
-      // --- help / modpack simples ---
+      // --- modpack ---
       if (name === "modpack") {
         return interaction.reply({
           content:
@@ -436,12 +452,10 @@ client.on("interactionCreate", async (interaction) => {
       if (name === "help") {
         return interaction.reply({ content: "Use os comandos /listmods /adicionarmod /removermod /painel /modpack", ephemeral: true });
       }
-
     } // end chat command
 
   } catch (err) {
     console.error("Interaction handler error:", err);
-    // se for chat command tente responder
     try {
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply({ content: `❌ Erro: ${err.message}` });
@@ -449,7 +463,6 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({ content: `❌ Erro: ${err.message}`, ephemeral: true });
       }
     } catch (e) {
-      // swallow
       console.error("Failed to notify user about error:", e);
     }
   }
