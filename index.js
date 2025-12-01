@@ -8,87 +8,49 @@ const {
   ButtonStyle,
   EmbedBuilder,
   PermissionFlagsBits,
-  InteractionResponseFlags,
 } = pkg;
 
+import SFTPClient from "ssh2-sftp-client";
 import fs from "fs";
-import path from "path";
 import os from "os";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { Octokit } from "@octokit/rest";
 dotenv.config();
 
-// ---------- CONFIG ----------
-const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
-const uploadCooldowns = new Map(); // userId -> timestamp
-
-// Local mods folder (no SFTP mode)
-const LOCAL_MODS_PATH = process.env.LOCAL_MODS_PATH || path.resolve("./mods");
-const HISTORY_FILE = process.env.HISTORY_FILE || path.resolve("./modHistory.json");
-
-// Create mods dir if not exists
-if (!fs.existsSync(LOCAL_MODS_PATH)) {
-  fs.mkdirSync(LOCAL_MODS_PATH, { recursive: true });
-}
-
-// ---------- State ----------
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+// ========== CONFIGURAÇÃO (tuneável) ==========
+const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
+// Nota: agora a checagem de "allowed" é feita por isAllowed(fileName)
+const uploadCooldowns = new Map(); // userId -> timestamp
+// Histórico completo de mods
+// Cada entrada: { action: "add"|"remove", fileName, userId, username, timestamp }
+const modHistory = [];
 const pendingApprovals = new Map(); // messageId -> { file, uploader, requestMessageId }
-let modHistory = []; // loaded from disk
 
-// ---------- Utils: load/save history ----------
-function loadHistory() {
-  try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      const raw = fs.readFileSync(HISTORY_FILE, "utf8");
-      modHistory = JSON.parse(raw);
-      if (!Array.isArray(modHistory)) modHistory = [];
-    } else {
-      modHistory = [];
-    }
-  } catch (e) {
-    console.error("Erro ao ler histórico:", e);
-    modHistory = [];
-  }
-}
-function saveHistory() {
-  try {
-    // atomic write
-    const tmp = `${HISTORY_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(modHistory, null, 2), "utf8");
-    fs.renameSync(tmp, HISTORY_FILE);
-  } catch (e) {
-    console.error("Erro ao salvar histórico:", e);
-  }
-}
 function addHistory(action, fileName, user) {
-  const entry = {
-    action, // "add" | "remove"
+  modHistory.push({
+    action,
     fileName,
-    userId: user?.id ?? String(user),
-    username: user?.tag ?? user?.username ?? String(user),
-    timestamp: Date.now(),
-  };
-  modHistory.push(entry);
-  // keep growth manageable (optional): keep last 5000
-  if (modHistory.length > 5000) modHistory = modHistory.slice(-5000);
-  saveHistory();
+    userId: user.id,
+    username: user.tag ?? String(user.id),
+    timestamp: Date.now()
+  });
 }
 
-// load at startup
-loadHistory();
-
-// ---------- GITHUB (kept, optional) ----------
+// ========== GITHUB ==========
 const octokit = new Octokit({ auth: process.env.MGT_ID });
 const GITHUB_OWNER = process.env.MGT_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_PATH = process.env.GITHUB_PATH || "mods";
 
-async function uploadToGitHub(file, buffer) {
-  if (!process.env.MGT_ID || !GITHUB_OWNER || !GITHUB_REPO) return;
+// upload/update file to GitHub
+async function uploadToGitHub(file) {
   const fullPath = `${GITHUB_PATH}/${file.name}`;
-  const content = buffer.toString("base64");
+  const res = await fetch(file.url);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const content = buf.toString("base64");
 
   let sha;
   try {
@@ -112,8 +74,8 @@ async function uploadToGitHub(file, buffer) {
   });
 }
 
+// remove file from GitHub
 async function removeFromGitHub(filename) {
-  if (!process.env.MGT_ID || !GITHUB_OWNER || !GITHUB_REPO) return filename;
   const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
   try {
     const { data } = await octokit.repos.getContent({
@@ -131,16 +93,58 @@ async function removeFromGitHub(filename) {
     });
     return sanitized;
   } catch (err) {
-    // se falhar, logue e continue (pode não existir no GitHub)
-    console.warn("removeFromGitHub warning:", err.message);
-    return sanitized;
+    throw new Error(`GitHub: ${err.message}`);
   }
 }
 
-// ---------- PTERODACTYL helpers (kept optional) ----------
+// ========== SFTP ==========
+const sftp = new SFTPClient();
+async function ensureSFTP() {
+  try {
+    await sftp.list("/");
+  } catch {
+    await sftp.connect({
+      host: process.env.SFTP_HOST,
+      port: Number(process.env.SFTP_PORT) || 22,
+      username: process.env.SFTP_USER,
+      password: process.env.SFTP_PASS,
+      hostVerifier: () => true,
+    });
+  }
+}
+
+async function listModsRaw() {
+  await ensureSFTP();
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
+  return await sftp.list(modsPath);
+}
+async function listMods() {
+  const raw = await listModsRaw();
+  return raw.map((m) => m.name);
+}
+
+async function uploadModToSFTP(file) {
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
+  const tempPath = `${os.tmpdir()}/${file.name}`;
+  const res = await fetch(file.url);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await fs.promises.writeFile(tempPath, buf);
+  await ensureSFTP();
+  await sftp.put(tempPath, `${modsPath}/${file.name}`);
+  try { await fs.promises.unlink(tempPath); } catch {}
+}
+
+async function removeModSFTP(filename) {
+  const modsPath = process.env.SFTP_MODS_PATH || "mods";
+  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
+  await ensureSFTP();
+  await sftp.delete(`${modsPath}/${sanitized}`);
+  return sanitized;
+}
+
+// ========== PTERODACTYL ==========
 async function getServerStatusPtero() {
   try {
-    if (!process.env.PTERO_PANEL_URL) return { online: false, error: "PTERO não configurado" };
     const res = await fetch(
       `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/resources`,
       {
@@ -166,7 +170,6 @@ async function getServerStatusPtero() {
 
 async function restartServerPtero() {
   try {
-    if (!process.env.PTERO_PANEL_URL) return "PTERO não configurado";
     await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`, {
       method: "POST",
       headers: {
@@ -183,7 +186,6 @@ async function restartServerPtero() {
 
 async function sendCommandPtero(command) {
   try {
-    if (!process.env.PTERO_PANEL_URL) return false;
     await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`, {
       method: "POST",
       headers: {
@@ -198,41 +200,37 @@ async function sendCommandPtero(command) {
   }
 }
 
-// ---------- Local mods operations ----------
-async function listModsRaw() {
-  const files = await fs.promises.readdir(LOCAL_MODS_PATH, { withFileTypes: true });
-  return files.filter((f) => f.isFile()).map((f) => ({ name: f.name }));
-}
-async function listMods() {
-  const raw = await listModsRaw();
-  // sort alphabetically
-  return raw.map((m) => m.name).sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+// ========== UPLOADS / APROVAÇÃO ==========
+function registerUpload(userId, username, fileName) {
+  uploadHistory.push({ userId, username, fileName, timestamp: Date.now() });
 }
 
-async function saveFileToLocal(file, buffer) {
-  const dest = path.join(LOCAL_MODS_PATH, file.name);
-  await fs.promises.writeFile(dest, buffer);
-  return dest;
+async function realizarUploadCompleto(file, uploaderId) {
+  await uploadModToSFTP(file);
+  await uploadToGitHub(file);
+
+  registerUpload(uploaderId, String(uploaderId), file.name);
+
+  // HISTÓRICO
+  addHistory("add", file.name, { id: uploaderId, tag: `${uploaderId}` });
+
+  await sendCommandPtero(`say Novo mod adicionado: ${file.name}`);
+  const restartMsg = await restartServerPtero();
+  return restartMsg;
 }
 
-async function removeLocalMod(filename) {
-  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "");
-  const p = path.join(LOCAL_MODS_PATH, sanitized);
-  await fs.promises.unlink(p);
-  return sanitized;
-}
-
-// ---------- Rules: NeoForge 1.21.1 check ----------
+// ========== REGRAS DE PERMISSÃO (NEOFORGE 1.21.1 / build opcional) ==========
 function isAllowedFilename(filename) {
   if (!filename) return false;
   const s = filename.toLowerCase();
+  // exige 'neoforge' e '1.21.1' em qualquer ordem OR aceita string build '21.1.213'
   if (s.includes("21.1.213")) return true;
   return s.includes("neoforge") && s.includes("1.21.1");
 }
 
-// ---------- Approval flow ----------
+// função usada quando mod não está em allowed -> cria mensagem de aprovação no canal de moderação
 async function pedirAprovacao(interaction, file) {
-  // reply to author using flags for ephemeral
+  // respondemos ao autor (editReply se possível, se não usamos followUp)
   try {
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply({
@@ -243,7 +241,7 @@ async function pedirAprovacao(interaction, file) {
     } else {
       await interaction.reply({
         content: `📨 Pedido de aprovação enviado para revisores. Você será notificado aqui quando aprovado ou rejeitado.`,
-        flags: InteractionResponseFlags.Ephemeral,
+        ephemeral: true,
       });
     }
   } catch (e) {
@@ -252,7 +250,7 @@ async function pedirAprovacao(interaction, file) {
 
   const modChannelId = process.env.MOD_APPROVAL_CHANNEL;
   if (!modChannelId) {
-    return interaction.followUp({ content: "❌ Canal de aprovação não configurado.", flags: InteractionResponseFlags.Ephemeral });
+    return interaction.followUp({ content: "❌ Canal de aprovação não configurado.", ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -272,24 +270,25 @@ async function pedirAprovacao(interaction, file) {
 
   const modChannel = await client.channels.fetch(modChannelId).catch(() => null);
   if (!modChannel || !modChannel.send) {
-    return interaction.followUp({ content: "❌ Não consegui postar o pedido no canal de aprovação.", flags: InteractionResponseFlags.Ephemeral });
+    return interaction.followUp({ content: "❌ Não consegui postar o pedido no canal de aprovação.", ephemeral: true });
   }
 
   const msg = await modChannel.send({ embeds: [embed], components: [row] });
+  // armazenar por message.id para aprovação posterior
   pendingApprovals.set(msg.id, { file, uploader: interaction.user, requestMessageId: interaction.id });
   return;
 }
 
-// ---------- Interaction handler ----------
+// ========== AUTOCOMPLETE / INTERAÇÕES UNIFICADAS ==========
 client.on("interactionCreate", async (interaction) => {
   try {
-    // AUTOCOMPLETE
+    // AUTOCOMPLETE (removermod)
     if (interaction.isAutocomplete()) {
       if (interaction.commandName === "removermod") {
-        const focused = String(interaction.options.getFocused() ?? "");
+        const focused = interaction.options.getFocused();
         const mods = await listMods();
         const filtered = mods
-          .filter((m) => m.toLowerCase().includes(focused.toLowerCase()))
+          .filter((m) => m.toLowerCase().includes(String(focused).toLowerCase()))
           .slice(0, 25)
           .map((m) => ({ name: m, value: m }));
         await interaction.respond(filtered);
@@ -297,67 +296,52 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // BUTTONS
+    // BOTÕES
     if (interaction.isButton()) {
-      // painel buttons
+      // BOTÕES DO PAINEL
       if (interaction.customId === "painel_listar") {
         const mods = await listMods();
-        const text = mods.length ? mods.join("\n") : "Nenhum mod.";
-        // if large send as file
-        if (text.length > 1800) {
-          const filePath = path.join(os.tmpdir(), `mods-list-${Date.now()}.txt`);
-          await fs.promises.writeFile(filePath, text, "utf8");
-          return interaction.reply({ files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })], flags: InteractionResponseFlags.Ephemeral });
-        } else {
-          return interaction.reply({ content: text, flags: InteractionResponseFlags.Ephemeral });
-        }
+        return interaction.reply({ content: mods.length ? mods.join("\n") : "Nenhum mod.", ephemeral: true });
       }
-
       if (interaction.customId === "painel_restart") {
         const msg = await restartServerPtero();
-        return interaction.reply({ content: msg, flags: InteractionResponseFlags.Ephemeral });
+        return interaction.reply({ content: msg, ephemeral: true });
       }
-
       if (interaction.customId === "painel_info") {
         const status = await getServerStatusPtero();
         const pretty = status.online
           ? `🟢 Online — CPU ${status.cpu}% — Mem ${Math.round(status.memory / 1024 / 1024)} MB`
           : `🔴 Offline — ${status.error || "erro desconhecido"}`;
-        return interaction.reply({ content: pretty, flags: InteractionResponseFlags.Ephemeral });
+        return interaction.reply({ content: pretty, ephemeral: true });
       }
 
-      // approval buttons in moderator channel
+      // APROVAÇÃO DE MOD (NO CANAL DE MODERAÇÃO)
       if (interaction.customId === "approve_mod" || interaction.customId === "reject_mod") {
+        // checar permissão
         const member = interaction.member;
         const isMod = member?.permissions?.has?.(PermissionFlagsBits.ManageGuild) || member?.permissions?.has?.(PermissionFlagsBits.Administrator);
         if (!isMod) {
-          return interaction.reply({ content: "❌ Você não tem permissão para moderar.", flags: InteractionResponseFlags.Ephemeral });
+          return interaction.reply({ content: "❌ Você não tem permissão para moderar.", ephemeral: true });
         }
 
         const msgId = interaction.message.id;
         const pending = pendingApprovals.get(msgId);
-        if (!pending) return interaction.reply({ content: "❌ Pedido expirado ou não encontrado.", flags: InteractionResponseFlags.Ephemeral });
-        pendingApprovals.delete(msgId);
+        if (!pending) return interaction.reply({ content: "❌ Pedido expirado ou não encontrado.", ephemeral: true });
 
+        pendingApprovals.delete(msgId);
         if (interaction.customId === "reject_mod") {
-          try { await pending.uploader.send(`❌ Seu mod **${pending.file.name}** foi rejeitado pelos moderadores.`); } catch {}
+          // notificar uploader
+          const uploader = pending.uploader;
+          try { await uploader.send(`❌ Seu mod **${pending.file.name}** foi rejeitado pelos moderadores.`); } catch {}
           await interaction.update({ content: "❌ Mod rejeitado.", embeds: [], components: [] });
           return;
         }
 
-        // approve
+        // APPROVE
         await interaction.update({ content: "✔️ Mod aprovado — processando upload...", embeds: [], components: [] });
         try {
-          // download file
-          const res = await fetch(pending.file.url);
-          const buf = Buffer.from(await res.arrayBuffer());
-          // save locally
-          await saveFileToLocal(pending.file, buf);
-          // upload to github (optional)
-          try { await uploadToGitHub(pending.file, buf); } catch (e) { console.warn("GitHub upload fail:", e.message); }
-          // history
-          addHistory("add", pending.file.name, pending.uploader);
-          try { await pending.uploader.send(`✔️ Seu mod **${pending.file.name}** foi aprovado e enviado.`); } catch {}
+          const restartMsg = await realizarUploadCompleto(pending.file, pending.uploader.id);
+          try { await pending.uploader.send(`✔️ Seu mod **${pending.file.name}** foi aprovado e enviado.\n${restartMsg}`); } catch {}
           const logChannelId = process.env.DISCORD_LOG_CHANNEL;
           if (logChannelId) {
             const log = await client.channels.fetch(logChannelId).catch(() => null);
@@ -365,123 +349,107 @@ client.on("interactionCreate", async (interaction) => {
               await log.send(`📥 Mod aprovado e enviado: **${pending.file.name}** (por ${pending.uploader.tag || pending.uploader.id})`);
             }
           }
-          // optional notify server
-          await sendCommandPtero(`say Novo mod adicionado: ${pending.file.name}`);
-          await restartServerPtero();
         } catch (e) {
-          await interaction.followUp({ content: `❌ Falha no upload: ${e.message}`, flags: InteractionResponseFlags.Ephemeral });
+          await interaction.followUp({ content: `❌ Falha no upload: ${e.message}`, ephemeral: true });
         }
         return;
       }
       return;
     }
 
-    // COMMANDS
+    // COMANDOS
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
 
-      // histórico (admin only)
+            // --- historico ---
       if (name === "historico") {
-        const member = interaction.member;
-        const isAdmin = member?.permissions?.has?.(PermissionFlagsBits.ManageGuild) || member?.permissions?.has?.(PermissionFlagsBits.Administrator);
-        if (!isAdmin) {
-          return interaction.reply({ content: "❌ Apenas administradores podem ver o histórico.", flags: InteractionResponseFlags.Ephemeral });
-        }
         if (modHistory.length === 0) {
-          return interaction.reply({ content: "📭 O histórico está vazio.", flags: InteractionResponseFlags.Ephemeral });
+          return interaction.reply({ content: "📭 O histórico está vazio.", ephemeral: true });
         }
 
-        // Prepare text: last 200 actions (configurable)
-        const items = modHistory.slice(-200).reverse();
-        let text = "📝 **Histórico de Mods** (últimas ações)\n\n";
-        for (const h of items) {
+        let text = "📝 **Histórico de Mods** (últimas 50 ações)\n\n";
+
+        for (const h of modHistory.slice(-50).reverse()) {
           const date = new Date(h.timestamp).toLocaleString("pt-BR");
           const icon = h.action === "add" ? "📥 Adicionado" : "🗑 Removido";
-          text += `**${icon}** — \`${h.fileName}\`\n👤 ${h.username} (${h.userId})\n📅 ${date}\n\n`;
+          text += `**${icon}** — \`${h.fileName}\`\n👤 ${h.username}\n📅 ${date}\n\n`;
         }
 
-        // if too large, send as file
-        if (text.length > 1800) {
-          const filePath = path.join(os.tmpdir(), `mod-history-${Date.now()}.txt`);
-          await fs.promises.writeFile(filePath, text, "utf8");
-          return interaction.reply({ files: [new AttachmentBuilder(filePath, { name: "mod-history.txt" })], flags: InteractionResponseFlags.Ephemeral });
-        } else {
-          return interaction.reply({ content: text, flags: InteractionResponseFlags.Ephemeral });
-        }
+        return interaction.reply({ content: text, ephemeral: true });
       }
 
-      // ping
-      if (name === "ping") return interaction.reply({ content: "🏓 Pong!", flags: InteractionResponseFlags.Ephemeral });
+      // --- ping ---
+      if (name === "ping") return interaction.reply({ content: "🏓 Pong!", ephemeral: true });
 
-      // listmods
+      // --- listmods ---
       if (name === "listmods") {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply();
         const mods = await listMods();
         const text = mods.length ? mods.join("\n") : "Nenhum mod";
-        // write file and send (safer)
-        const filePath = path.join(os.tmpdir(), `mods-list-${Date.now()}.txt`);
-        await fs.promises.writeFile(filePath, text, "utf8");
+        const filePath = `${os.tmpdir()}/mods-list.txt`;
+        await fs.promises.writeFile(filePath, text);
         return interaction.editReply({ content: `📦 Mods instalados: ${mods.length}`, files: [new AttachmentBuilder(filePath, { name: "mods-list.txt" })] });
       }
 
-      // adicionarmod
+      // --- adicionarmod ---
       if (name === "adicionarmod") {
         const file = interaction.options.getAttachment("arquivo");
-        if (!file || !file.name.endsWith(".jar")) return interaction.reply({ content: "❌ Envie um arquivo .jar", flags: InteractionResponseFlags.Ephemeral });
+        if (!file || !file.name.endsWith(".jar")) return interaction.reply({ content: "❌ Envie um arquivo .jar", ephemeral: true });
 
-        // quick reply to avoid timeout
-        await interaction.reply({ content: "📤 Recebido — processando...", flags: InteractionResponseFlags.Ephemeral });
+        // respondemos rápido para evitar timeout do Discord (e marcamos que já respondemos)
+        await interaction.reply({ content: "📤 Recebido — processando...", ephemeral: true });
 
+        // cooldown
         const userId = interaction.user.id;
         const now = Date.now();
         if (uploadCooldowns.has(userId) && now - uploadCooldowns.get(userId) < COOLDOWN_TIME) {
-          return interaction.editReply({ content: "⏱ Aguarde antes de enviar outro mod.", flags: InteractionResponseFlags.Ephemeral });
+          return interaction.editReply({ content: "⏱ Aguarde antes de enviar outro mod.", ephemeral: true });
         }
 
-        // check allowed
+        // check allowed rule: neoforge + 1.21.1 OR build 21.1.213
         if (!isAllowedFilename(file.name)) {
+          // criar pedido de aprovação no canal de moderação
           return pedirAprovacao(interaction, file);
         }
 
-        // direct upload: fetch file and save locally, upload to GitHub if configured
+        // upload direto
         try {
-          const res = await fetch(file.url);
-          const buf = Buffer.from(await res.arrayBuffer());
-          await saveFileToLocal(file, buf);
-          try { await uploadToGitHub(file, buf); } catch (e) { console.warn("GitHub upload failed:", e.message); }
-          addHistory("add", file.name, interaction.user);
+          const restartMsg = await realizarUploadCompleto(file, userId);
           uploadCooldowns.set(userId, Date.now());
-          // notify server optionally
-          await sendCommandPtero(`say Novo mod adicionado: ${file.name}`);
-          await restartServerPtero();
-          return interaction.editReply({ content: `✅ Mod enviado!\n${file.name}`, flags: InteractionResponseFlags.Ephemeral });
+          return interaction.editReply({ content: `✅ Mod enviado!\n${restartMsg}`, ephemeral: true });
         } catch (e) {
-          return interaction.editReply({ content: `❌ Erro no upload: ${e.message}`, flags: InteractionResponseFlags.Ephemeral });
+          return interaction.editReply({ content: `❌ Erro no upload: ${e.message}`, ephemeral: true });
         }
       }
 
-      // removermod
+      // --- removermod ---
       if (name === "removermod") {
         const filename = interaction.options.getString("nome");
-        if (!filename) return interaction.reply({ content: "❌ Informe o nome do mod.", flags: InteractionResponseFlags.Ephemeral });
-        await interaction.reply({ content: "🗑 Removendo...", flags: InteractionResponseFlags.Ephemeral });
+        if (!filename) return interaction.reply({ content: "❌ Informe o nome do mod.", ephemeral: true });
+        await interaction.reply({ content: "🗑 Removendo...", ephemeral: true });
 
         try {
-          // try GitHub removal (optional)
-          try { await removeFromGitHub(filename); } catch (e) { console.warn("GitHub removal warn:", e.message); }
+          try {
+            await removeFromGitHub(filename);
+          } catch (e) {
+            // loga e continua para tentar SFTP
+            console.error("GitHub remove error:", e.message);
+          }
 
-          const removed = await removeLocalMod(filename);
+          const removed = await removeModSFTP(filename);
+          await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: true });
+          // HISTÓRICO
           addHistory("remove", removed, interaction.user);
-          await interaction.editReply({ content: `✅ Removido: ${removed}`, flags: InteractionResponseFlags.Ephemeral });
+          // notify server
           await sendCommandPtero(`say Mod removido: ${removed}`);
           await restartServerPtero();
         } catch (e) {
-          return interaction.editReply({ content: `❌ Erro ao remover: ${e.message}`, flags: InteractionResponseFlags.Ephemeral });
+          return interaction.editReply({ content: `❌ Erro ao remover: ${e.message}`, ephemeral: true });
         }
         return;
       }
 
-      // painel
+      // --- painel (embed + botões) ---
       if (name === "painel") {
         const embed = new EmbedBuilder()
           .setTitle("⚙️ Painel de Gerenciamento")
@@ -494,37 +462,40 @@ client.on("interactionCreate", async (interaction) => {
           new ButtonBuilder().setCustomId("painel_info").setLabel("ℹ️ Info").setStyle(ButtonStyle.Secondary)
         );
 
-        return interaction.reply({ embeds: [embed], components: [row] });
+        return interaction.reply({ embeds: [embed], components: [row], ephemeral: false });
       }
 
-      // info
+      // --- info ---
       if (name === "info") {
         await interaction.deferReply({ ephemeral: true });
         const status = await getServerStatusPtero();
         const text = status.online
-          ? `🟢 Online\nCPU: ${status.cpu}%\nMem: ${Math.round(status.memory / 1024 / 1024)} MB\nEstado: ${status.status}`
+          ? `🟢 Online\nCPU: ${status.cpu}%\nMem: ${Math.round(status.memory/1024/1024)} MB\nEstado: ${status.status}`
           : `🔴 Offline\nErro: ${status.error}`;
-        return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, flags: InteractionResponseFlags.Ephemeral });
+        return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, ephemeral: true });
       }
 
-      // modpack (link)
+      // --- modpack ---
       if (name === "modpack") {
-        const replyText = process.env.MODPACK_TEXT || "📥 **Modpack (GitHub)**\n`git clone https://github.com/Baryczka25/MGT-Server.git`";
-        return interaction.reply({ content: replyText, flags: InteractionResponseFlags.Ephemeral });
+        return interaction.reply({
+          content:
+            "📥 **Modpack (GitHub)**\n`git clone https://github.com/Baryczka25/MGT-Server.git`\n\nBaixe em: https://github.com/Baryczka25/MGT-Server/archive/refs/heads/main.zip",
+          ephemeral: true,
+        });
       }
 
       if (name === "help") {
-        return interaction.reply({ content: "Use os comandos /listmods /adicionarmod /removermod /painel /modpack /historico", flags: InteractionResponseFlags.Ephemeral });
+        return interaction.reply({ content: "Use os comandos /listmods /adicionarmod /removermod /painel /modpack", ephemeral: true });
       }
-    }
+    } // end chat command
 
   } catch (err) {
     console.error("Interaction handler error:", err);
     try {
-      if (interaction?.deferred || interaction?.replied) {
+      if (interaction.deferred || interaction.replied) {
         await interaction.editReply({ content: `❌ Erro: ${err.message}` });
-      } else if (interaction) {
-        await interaction.reply({ content: `❌ Erro: ${err.message}`, flags: InteractionResponseFlags.Ephemeral });
+      } else {
+        await interaction.reply({ content: `❌ Erro: ${err.message}`, ephemeral: true });
       }
     } catch (e) {
       console.error("Failed to notify user about error:", e);
@@ -532,6 +503,6 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ---------- Login ----------
+// login
 client.once("ready", () => console.log("🤖 Bot online!"));
 client.login(process.env.DISCORD_TOKEN);
