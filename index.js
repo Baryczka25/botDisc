@@ -485,7 +485,20 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (name === "help") {
-        return interaction.reply({ content: "Use os comandos /listmods /adicionarmod /removermod /painel /modpack", ephemeral: true });
+      return interaction.reply({
+        content:
+          "📘 **Comandos Disponíveis:**\n\n" +
+          "• `/ping` — Testa o bot\n" +
+          "• `/listmods` — Lista mods instalados\n" +
+          "• `/adicionarmod` — Envia um mod (curadoria + cooldown + GitHub)\n" +
+          "• `/removermod` — Remove um mod (SFTP + GitHub)\n" +
+          "• `/historico` — Lista histórico de uploads (admin)\n" +
+          "• `/info` — Informações gerais\n" +
+          "• `/restart` — Reinicia o servidor\n" +
+          "• `/modpack` — Link para baixar o modpack (GitHub)\n" +
+          "• `/help` — Ajuda",
+        ephemeral: true,
+      });
       }
     } // end chat command
 
