@@ -400,7 +400,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply("🔄 Reiniciando servidor...");
       const restartMsg = await restartServerPtero();
       return interaction.editReply(restartMsg);
-
+      }
       // --- listmods ---
       if (name === "listmods") {
         await interaction.deferReply();
