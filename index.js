@@ -26,7 +26,7 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 if (!process.env.GITHUB_TOKEN) {
-  console.error("❌ GITHUB_TOKEN faltando no .env");
+  console.error("❌ MGT_ID faltando no .env");
   process.exit(1);
 }
 
@@ -62,7 +62,7 @@ async function connectSFTP() {
 // GITHUB CONFIG
 // ==========================
 const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
+  auth: process.env.MGT_ID,
 });
 
 const repoOwner = "Baryczka25";
