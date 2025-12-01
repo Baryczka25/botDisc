@@ -209,7 +209,14 @@ async function sendCommandPtero(command) {
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
   // usa o uploadHistory declarado acima
-  uploadHistory.push({ userId, username, fileName, timestamp: Date.now() });
+  uploadHistory.push({
+  action: "add",
+  file: file.name,
+  user: {
+    id: interaction.user.id,
+    name: interaction.member?.nickname || interaction.user.username
+  },
+  date: new Date().toISOString() });
 }
 
 async function realizarUploadCompleto(file, uploaderId) {
@@ -387,6 +394,12 @@ client.on("interactionCreate", async (interaction) => {
 
       // --- ping ---
       if (name === "ping") return interaction.reply({ content: "🏓 Pong!", ephemeral: true });
+
+      // --- restart ---
+      if (name === "restart") {
+      await interaction.reply("🔄 Reiniciando servidor...");
+      const restartMsg = await restartServerPtero();
+      return interaction.editReply(restartMsg);
 
       // --- listmods ---
       if (name === "listmods") {
