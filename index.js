@@ -24,8 +24,20 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 // Nota: agora a checagem de "allowed" é feita por isAllowed(fileName)
 const uploadCooldowns = new Map(); // userId -> timestamp
-const uploadHistory = []; // histórico simples
+// Histórico completo de mods
+// Cada entrada: { action: "add"|"remove", fileName, userId, username, timestamp }
+const modHistory = [];
 const pendingApprovals = new Map(); // messageId -> { file, uploader, requestMessageId }
+
+function addHistory(action, fileName, user) {
+  modHistory.push({
+    action,
+    fileName,
+    userId: user.id,
+    username: user.tag ?? String(user.id),
+    timestamp: Date.now()
+  });
+}
 
 // ========== GITHUB ==========
 const octokit = new Octokit({ auth: process.env.MGT_ID });
@@ -194,10 +206,14 @@ function registerUpload(userId, username, fileName) {
 }
 
 async function realizarUploadCompleto(file, uploaderId) {
-  // faz SFTP + GitHub
   await uploadModToSFTP(file);
   await uploadToGitHub(file);
+
   registerUpload(uploaderId, String(uploaderId), file.name);
+
+  // HISTÓRICO
+  addHistory("add", file.name, { id: uploaderId, tag: `${uploaderId}` });
+
   await sendCommandPtero(`say Novo mod adicionado: ${file.name}`);
   const restartMsg = await restartServerPtero();
   return restartMsg;
@@ -345,6 +361,23 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
 
+      // --- historico ---
+      if (name === "historico") {
+        if (modHistory.length === 0) {
+          return interaction.reply({ content: "📭 O histórico está vazio.", ephemeral: true });
+        }
+
+        let text = "📝 **Histórico de Mods** (últimas 50 ações)\n\n";
+
+        for (const h of modHistory.slice(-50).reverse()) {
+          const date = new Date(h.timestamp).toLocaleString("pt-BR");
+          const icon = h.action === "add" ? "📥 Adicionado" : "🗑 Removido";
+          text += `**${icon}** — \`${h.fileName}\`\n👤 ${h.username}\n📅 ${date}\n\n`;
+        }
+
+        return interaction.reply({ content: text, ephemeral: true });
+      }
+
       // --- ping ---
       if (name === "ping") return interaction.reply({ content: "🏓 Pong!", ephemeral: true });
 
@@ -405,6 +438,8 @@ client.on("interactionCreate", async (interaction) => {
 
           const removed = await removeModSFTP(filename);
           await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: true });
+          // HISTÓRICO
+          addHistory("remove", removed, interaction.user);
           // notify server
           await sendCommandPtero(`say Mod removido: ${removed}`);
           await restartServerPtero();

@@ -61,6 +61,10 @@ const commands = [
   description: "Baixe o modpack completo do servidor (GitHub)"
   },
   {
+    name: "painel",
+    description: "Abre o painel de gerenciamento do servidor"
+  },
+  {
     name: "help",
     description: "Mostra todos os comandos disponíveis"
   }
