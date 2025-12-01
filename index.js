@@ -11,6 +11,7 @@ const {
 } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
+
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
@@ -24,11 +25,16 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 // Nota: agora a checagem de "allowed" é feita por isAllowed(fileName)
 const uploadCooldowns = new Map(); // userId -> timestamp
+
 // Histórico completo de mods
 // Cada entrada: { action: "add"|"remove", fileName, userId, username, timestamp }
 const modHistory = [];
 const pendingApprovals = new Map(); // messageId -> { file, uploader, requestMessageId }
 
+// CORREÇÃO: declarar uploadHistory (usado por registerUpload)
+const uploadHistory = [];
+
+// helper para histórico em memória
 function addHistory(action, fileName, user) {
   modHistory.push({
     action,
@@ -202,6 +208,7 @@ async function sendCommandPtero(command) {
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
+  // usa o uploadHistory declarado acima
   uploadHistory.push({ userId, username, fileName, timestamp: Date.now() });
 }
 
