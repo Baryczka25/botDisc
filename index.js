@@ -26,9 +26,35 @@ const COOLDOWN_TIME = 1000 * 60 * 5; // 5 minutos
 // Nota: agora a checagem de "allowed" é feita por isAllowed(fileName)
 const uploadCooldowns = new Map(); // userId -> timestamp
 
+// ======== HISTÓRICO PERSISTENTE ==========
+const HISTORY_FILE = "./modHistory.json";
+
+function carregarHistorico() {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      const raw = fs.readFileSync(HISTORY_FILE, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error("Falha ao carregar histórico:", e);
+  }
+  return [];
+}
+
+function salvarHistorico() {
+  try {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(modHistory, null, 2));
+  } catch (e) {
+    console.error("Falha ao salvar histórico:", e);
+  }
+}
+
+// Carrega o histórico no boot
+const modHistory = carregarHistorico();
+
+
 // Histórico completo de mods
 // Cada entrada: { action: "add"|"remove", fileName, userId, username, timestamp }
-const modHistory = [];
 const pendingApprovals = new Map(); // messageId -> { file, uploader, requestMessageId }
 
 // CORREÇÃO: declarar uploadHistory (usado por registerUpload)
@@ -43,6 +69,8 @@ function addHistory(action, fileName, user) {
     username: user.tag ?? String(user.id),
     timestamp: Date.now()
   });
+
+  salvarHistorico(); // <--- SALVAR NO JSON
 }
 
 // ========== GITHUB ==========
@@ -208,15 +236,7 @@ async function sendCommandPtero(command) {
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
-  // usa o uploadHistory declarado acima
-  uploadHistory.push({
-  action: "add",
-  file: file.name,
-  user: {
-    id: interaction.user.id,
-    name: interaction.member?.nickname || interaction.user.username
-  },
-  date: new Date().toISOString() });
+  addHistory("add", fileName, { id: userId, tag: username });
 }
 
 async function realizarUploadCompleto(file, uploaderId) {
