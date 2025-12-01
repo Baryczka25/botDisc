@@ -12,7 +12,6 @@ const {
 import fs from "fs";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import AdmZip from "adm-zip";
 
 dotenv.config();
 
