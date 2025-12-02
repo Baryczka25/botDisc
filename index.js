@@ -524,35 +524,36 @@ client.on("interactionCreate", async (interaction) => {
       }
           // --- info ---
           if (name === "info") {
-            await interaction.deferReply({ ephemeral: true });
+          await interaction.deferReply({ ephemeral: true });
 
-            const status = await getServerStatusPtero();
+          const status = await getServerStatusPtero();
 
-            if (!status.online) {
-              return interaction.editReply({
-                content: `🔴 **Servidor Offline**\nErro: ${status.error}`,
-                ephemeral: true
-              });
-            }
-
-            const players = await getPlayerListPtero();
-            const mem = Math.round(status.memory / 1024 / 1024);
-
-            const text =
-              `🟢 **Online**\n` +
-              `⚙️ CPU: ${status.cpu}%\n` +
-              `💾 Memória: ${mem} MB\n` +
-              `👥 Jogadores: ${players.count}\n` +
-              (players.count > 0
-                ? `📜 **Nomes**:\n• ${players.names.join("\n• ")}`
-                : `📭 Nenhum jogador online`) +
-              `\n📌 Estado: ${status.status}`;
-
+          if (!status.online) {
             return interaction.editReply({
-              content: `**STATUS DO SERVIDOR**\n${text}`,
+              content: `🔴 **Servidor Offline**\nErro: ${status.error}`,
               ephemeral: true
             });
           }
+
+          const players = await getPlayerListPtero();
+          const mem = Math.round(status.memory / 1024 / 1024);
+
+          const text =
+            `🟢 **Online**\n` +
+            `⚙️ CPU: ${status.cpu}%\n` +
+            `💾 Memória: ${mem} MB\n` +
+            `👥 Jogadores: ${players.count}\n` +
+            (players.count > 0
+              ? `📜 **Nomes**:\n• ${players.names.join("\n• ")}`
+              : `📭 Nenhum jogador online`) +
+            `\n📌 Estado: ${status.status}`;
+
+          return interaction.editReply({
+            content: `**STATUS DO SERVIDOR**\n${text}`,
+            ephemeral: true
+          });
+        }
+
       // --- modpack ---
       if (name === "modpack") {
         return interaction.reply({
