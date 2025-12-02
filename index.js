@@ -179,7 +179,40 @@ async function removeModSFTP(filename) {
 // Buscar status básico do Pterodactyl
 async function getServerStatusPtero() {
   try {
-    // envia o comando list
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/api/client/servers/${process.env.PTERO_SERVER_ID}/resources`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        }
+      }
+    );
+
+    if (!res.ok) {
+      return { online: false, error: `HTTP ${res.status}` };
+    }
+
+    const json = await res.json();
+    const a = json.attributes;
+
+    return {
+      online: true,
+      status: a.current_state,
+      cpu: a.resources.cpu_absolute,
+      memory: a.resources.memory_bytes,
+      uptime: a.resources.uptime
+    };
+  } catch (err) {
+    return { online: false, error: err.message };
+  }
+}
+
+async function getPlayerListPtero() {
+  try {
+    // envia comando
     await fetch(
       `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
       {
@@ -188,13 +221,13 @@ async function getServerStatusPtero() {
           Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ command: "list" }),
+        body: JSON.stringify({ command: "list" })
       }
     );
 
-    // aguarda logs serem atualizados
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 500));
 
+    // lê logs
     const logs = await fetch(
       `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/logs`,
       {
@@ -206,31 +239,27 @@ async function getServerStatusPtero() {
       }
     );
 
-    const data = await logs.json();
-    const lastLines = data?.data?.slice(-15).map((x) => x.line) || [];
+    const json = await logs.json();
+    const lines = json?.data?.map(l => l.line) || [];
 
-    // ---- SUPORTE A 2 FORMATOS ----
-    let line = lastLines.find(l => /players online/i.test(l));
+    // procura a linha do list
+    const line = lines.reverse().find(l => /players online/i.test(l));
 
     if (!line) return { count: 0, names: [] };
 
-    // Formato 1: "There are 2 players online: Steve, Alex"
+    // formato 1: There are 2 players online: Steve, Alex
     let match = line.match(/(\d+).*?online: (.*)/i);
 
-    // Formato 2: "Players online (1): Steve"
-    if (!match) {
-      match = line.match(/online\s*\((\d+)\)\s*:\s*(.*)/i);
-    }
+    // formato 2: Players online (1): Steve
+    if (!match) match = line.match(/online\s*\((\d+)\)\s*:\s*(.*)/i);
 
     if (!match) return { count: 0, names: [] };
 
     const count = parseInt(match[1]);
-    const names = match[2]
-      .split(",")
-      .map(n => n.trim())
-      .filter(n => n.length > 0);
+    const names = match[2].split(",").map(v => v.trim()).filter(v => v);
 
     return { count, names };
+
   } catch (err) {
     return { count: 0, names: [], error: err.message };
   }
