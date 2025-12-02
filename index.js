@@ -507,15 +507,15 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
           // --- info ---
-          if (name === "info") {
+      if (name === "info") {
+        try {
           await interaction.deferReply({ ephemeral: true });
 
           const status = await getServerStatusPtero();
 
           if (!status.online) {
             return interaction.editReply({
-              content: `🔴 **Servidor Offline**\nErro: ${status.error}`,
-              ephemeral: true
+              content: `🔴 **Servidor Offline**\nErro: ${status.error}`
             });
           }
 
@@ -532,12 +532,16 @@ client.on("interactionCreate", async (interaction) => {
               : `📭 Nenhum jogador online`) +
             `\n📌 Estado: ${status.status}`;
 
+          return interaction.editReply({ content: text });
+
+        } catch (err) {
+          console.error("Erro no comando /info:", err);
+          // ❗ NUNCA use reply() depois de deferReply()
           return interaction.editReply({
-            content: `**STATUS DO SERVIDOR**\n${text}`,
-            ephemeral: true
+            content: `❌ Erro interno: ${err.message}`
           });
         }
-
+      }
       // --- modpack ---
       if (name === "modpack") {
         return interaction.reply({
