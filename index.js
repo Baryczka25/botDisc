@@ -192,6 +192,7 @@ async function getServerStatusPtero() {
     const data = await res.json();
     return {
       online: data.attributes.current_state === "running",
+      players: data.attributes.resources.players_current,
       cpu: data.attributes.resources.cpu_absolute,
       memory: data.attributes.resources.memory_bytes,
       disk: data.attributes.resources.disk_bytes,
