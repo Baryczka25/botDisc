@@ -177,6 +177,7 @@ async function removeModSFTP(filename) {
 }
 
 // Buscar status básico do Pterodactyl
+// Buscar status básico do Pterodactyl
 async function getServerStatusPtero() {
   try {
     const res = await fetch(
@@ -209,6 +210,7 @@ async function getServerStatusPtero() {
     return { online: false, error: err.message };
   }
 }
+
 // Buscar lista de jogadores via comando "list"
 async function getPlayerListPtero() {
   try {
@@ -248,6 +250,7 @@ async function getPlayerListPtero() {
     const json = await logsRes.json();
     const lines = json?.data?.map(l => l.line) || [];
 
+    // acha a linha "There are X players online:"
     const line = [...lines].reverse().find(l =>
       /players online/i.test(l)
     );
@@ -271,37 +274,6 @@ async function getPlayerListPtero() {
   }
 }
 
-async function restartServerPtero() {
-  try {
-    await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ signal: "restart" }),
-    });
-    return "🔄 Servidor reiniciado!";
-  } catch (err) {
-    return `Erro: ${err.message}`;
-  }
-}
-
-async function sendCommandPtero(command) {
-  try {
-    await fetch(`${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ command }),
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
