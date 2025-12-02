@@ -551,7 +551,7 @@ client.on("interactionCreate", async (interaction) => {
       }
           // --- info ---
           if (name === "info") {
-            await interaction.deferReply({ ephemeral: false });
+            await interaction.deferReply({ ephemeral: true });
 
             const status = await getServerStatusPtero();
 
