@@ -177,103 +177,80 @@ async function removeModSFTP(filename) {
 }
 
 // Buscar status básico do Pterodactyl
-// Buscar status básico do Pterodactyl
 async function getServerStatusPtero() {
   try {
     const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/api/client/servers/${process.env.PTERO_SERVER_ID}/resources`,
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/resources`,
       {
         method: "GET",
         headers: {
-          "Authorization": `Bearer ${process.env.PTERO_API_KEY}`,
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
           "Content-Type": "application/json",
-          "Accept": "application/json"
-        }
+          Accept: "application/json",
+        },
       }
     );
 
-    if (!res.ok) {
-      return { online: false, error: `HTTP ${res.status}` };
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const json = await res.json();
-    const a = json.attributes;
 
     return {
-      online: true,
-      status: a.current_state,
-      cpu: a.resources.cpu_absolute,
-      memory: a.resources.memory_bytes,
-      uptime: a.resources.uptime
+      online: json.attributes.current_state === "running",
+      cpu: json.attributes.resources.cpu_absolute,
+      memory: json.attributes.resources.memory_bytes,
+      disk: json.attributes.resources.disk_bytes,
+      status: json.attributes.current_state,
     };
+
   } catch (err) {
     return { online: false, error: err.message };
   }
 }
 
-// Buscar lista de jogadores via comando "list"
-async function getPlayerListPtero() {
+async function restartServerPtero() {
   try {
-    // Envia comando "list"
-    await fetch(
-      `${process.env.PTERO_PANEL_URL}/api/client/servers/${process.env.PTERO_SERVER_ID}/command`,
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`,
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.PTERO_API_KEY}`,
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
           "Content-Type": "application/json",
-          "Accept": "application/json"
         },
-        body: JSON.stringify({ command: "list" })
+        body: JSON.stringify({ signal: "restart" }),
       }
     );
 
-    // Espera o log ser atualizado
-    await new Promise(r => setTimeout(r, 800));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    // Busca os logs corretos (API client!)
-    const logsRes = await fetch(
-      `${process.env.PTERO_PANEL_URL}/api/client/servers/${process.env.PTERO_SERVER_ID}/logs`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${process.env.PTERO_API_KEY}`,
-          "Accept": "application/json"
-        }
-      }
-    );
-
-    if (!logsRes.ok) {
-      return { count: 0, names: [], error: `HTTP ${logsRes.status}` };
-    }
-
-    const json = await logsRes.json();
-    const lines = json?.data?.map(l => l.line) || [];
-
-    // acha a linha "There are X players online:"
-    const line = [...lines].reverse().find(l =>
-      /players online/i.test(l)
-    );
-
-    if (!line) return { count: 0, names: [] };
-
-    let match = line.match(/(\d+).*?online: (.*)/i);
-    if (!match) match = line.match(/online\s*\((\d+)\)\s*:\s*(.*)/i);
-    if (!match) return { count: 0, names: [] };
-
-    const count = Number(match[1]);
-    const names = match[2]
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    return { count, names };
-
+    return "🔄 Servidor reiniciado!";
   } catch (err) {
-    return { count: 0, names: [], error: err.message };
+    return `Erro: ${err.message}`;
   }
 }
 
+async function sendCommandPtero(command) {
+  try {
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ command }),
+      }
+    );
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
