@@ -177,40 +177,9 @@ async function removeModSFTP(filename) {
 }
 
 // Buscar status básico do Pterodactyl
-async function getServerStatusPtero() {
-  try {
-    const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/resources`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    const data = await res.json();
-
-    return {
-      online: data.attributes.current_state === "running",
-      players: data.attributes.resources.players_current,
-      cpu: data.attributes.resources.cpu_absolute,
-      memory: data.attributes.resources.memory_bytes,
-      disk: data.attributes.resources.disk_bytes,
-      status: data.attributes.current_state,
-    };
-  } catch (err) {
-    return { online: false, error: err.message };
-  }
-}
-
-
-
-// ========== PUXAR NOMES DOS PLAYERS — VIA COMANDO "list" ==========
 async function getPlayerListPtero() {
   try {
-    // Envia comando "list"
+    // envia o comando list
     await fetch(
       `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
       {
@@ -223,10 +192,9 @@ async function getPlayerListPtero() {
       }
     );
 
-    // esperar console registrar
+    // aguarda logs serem atualizados
     await new Promise((r) => setTimeout(r, 500));
 
-    // pegar logs recentes
     const logs = await fetch(
       `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/logs`,
       {
@@ -239,23 +207,28 @@ async function getPlayerListPtero() {
     );
 
     const data = await logs.json();
+    const lastLines = data?.data?.slice(-15).map((x) => x.line) || [];
 
-    const lastLines = data?.data?.slice(-10).map((x) => x.line) || [];
-
-    // Procurar linha contendo "players online"
-    const line = lastLines.find((l) =>
-      /players online/i.test(l)
-    );
+    // ---- SUPORTE A 2 FORMATOS ----
+    let line = lastLines.find(l => /players online/i.test(l));
 
     if (!line) return { count: 0, names: [] };
 
-    // Exemplo: "There are 2 players online: Steve, Alex"
-    const match = line.match(/(\d+).*?online: (.*)/i);
+    // Formato 1: "There are 2 players online: Steve, Alex"
+    let match = line.match(/(\d+).*?online: (.*)/i);
+
+    // Formato 2: "Players online (1): Steve"
+    if (!match) {
+      match = line.match(/online\s*\((\d+)\)\s*:\s*(.*)/i);
+    }
 
     if (!match) return { count: 0, names: [] };
 
     const count = parseInt(match[1]);
-    const names = match[2].split(",").map((n) => n.trim());
+    const names = match[2]
+      .split(",")
+      .map(n => n.trim())
+      .filter(n => n.length > 0);
 
     return { count, names };
   } catch (err) {
