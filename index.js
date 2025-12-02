@@ -176,7 +176,7 @@ async function removeModSFTP(filename) {
   return sanitized;
 }
 
-// ========== PTERODACTYL ==========
+// Buscar status básico do Pterodactyl
 async function getServerStatusPtero() {
   try {
     const res = await fetch(
@@ -189,7 +189,9 @@ async function getServerStatusPtero() {
         },
       }
     );
+
     const data = await res.json();
+
     return {
       online: data.attributes.current_state === "running",
       players: data.attributes.resources.players_current,
@@ -200,6 +202,64 @@ async function getServerStatusPtero() {
     };
   } catch (err) {
     return { online: false, error: err.message };
+  }
+}
+
+
+
+// ========== PUXAR NOMES DOS PLAYERS — VIA COMANDO "list" ==========
+async function getPlayerListPtero() {
+  try {
+    // Envia comando "list"
+    await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ command: "list" }),
+      }
+    );
+
+    // esperar console registrar
+    await new Promise((r) => setTimeout(r, 500));
+
+    // pegar logs recentes
+    const logs = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/logs`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const data = await logs.json();
+
+    const lastLines = data?.data?.slice(-10).map((x) => x.line) || [];
+
+    // Procurar linha contendo "players online"
+    const line = lastLines.find((l) =>
+      /players online/i.test(l)
+    );
+
+    if (!line) return { count: 0, names: [] };
+
+    // Exemplo: "There are 2 players online: Steve, Alex"
+    const match = line.match(/(\d+).*?online: (.*)/i);
+
+    if (!match) return { count: 0, names: [] };
+
+    const count = parseInt(match[1]);
+    const names = match[2].split(",").map((n) => n.trim());
+
+    return { count, names };
+  } catch (err) {
+    return { count: 0, names: [], error: err.message };
   }
 }
 
@@ -489,16 +549,37 @@ client.on("interactionCreate", async (interaction) => {
         }
         return;
       }
-      // --- info ---
-      if (name === "info") {
-        await interaction.deferReply({ ephemeral: true });
-        const status = await getServerStatusPtero();
-        const text = status.online
-          ? `🟢 Online\nCPU: ${status.cpu}%\n 👥 Jogadores: ${players}\n Mem: ${Math.round(status.memory/1024/1024)} MB\nEstado: ${status.status}`
-          : `🔴 Offline\nErro: ${status.error}`;
-        return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, ephemeral: true });
-      }
+          // --- info ---
+          if (name === "info") {
+            await interaction.deferReply({ ephemeral: true });
 
+            const status = await getServerStatusPtero();
+
+            if (!status.online) {
+              return interaction.editReply({
+                content: `🔴 **Servidor Offline**\nErro: ${status.error}`,
+                ephemeral: true
+              });
+            }
+
+            const players = await getPlayerListPtero();
+            const mem = Math.round(status.memory / 1024 / 1024);
+
+            const text =
+              `🟢 **Online**\n` +
+              `⚙️ CPU: ${status.cpu}%\n` +
+              `💾 Memória: ${mem} MB\n` +
+              `👥 Jogadores: ${players.count}\n` +
+              (players.count > 0
+                ? `📜 **Nomes**:\n• ${players.names.join("\n• ")}`
+                : `📭 Nenhum jogador online`) +
+              `\n📌 Estado: ${status.status}`;
+
+            return interaction.editReply({
+              content: `**STATUS DO SERVIDOR**\n${text}`,
+              ephemeral: true
+            });
+          }
       // --- modpack ---
       if (name === "modpack") {
         return interaction.reply({
