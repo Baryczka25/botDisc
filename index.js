@@ -494,7 +494,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
         const status = await getServerStatusPtero();
         const text = status.online
-          ? `🟢 Online\nCPU: ${status.cpu}%\nMem: ${status.players}/${status.maxPlayers} ${Math.round(status.memory/1024/1024)} MB\nEstado: ${status.status}`
+          ? `🟢 Online\nCPU: ${status.cpu}%\n 👥 Jogadores: ${players}\n Mem: ${Math.round(status.memory/1024/1024)} MB\nEstado: ${status.status}`
           : `🔴 Offline\nErro: ${status.error}`;
         return interaction.editReply({ content: `**STATUS DO SERVIDOR**\n${text}`, ephemeral: true });
       }
