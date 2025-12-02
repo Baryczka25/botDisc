@@ -538,7 +538,7 @@ client.on("interactionCreate", async (interaction) => {
           }
 
           const removed = await removeModSFTP(filename);
-          await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: true });
+          await interaction.editReply({ content: `✅ Removido: ${removed}`, ephemeral: false });
           // HISTÓRICO
           addHistory("remove", removed, interaction.user);
           // notify server
@@ -551,7 +551,7 @@ client.on("interactionCreate", async (interaction) => {
       }
           // --- info ---
           if (name === "info") {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ ephemeral: false });
 
             const status = await getServerStatusPtero();
 
