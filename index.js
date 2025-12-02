@@ -177,7 +177,7 @@ async function removeModSFTP(filename) {
 }
 
 // Buscar status básico do Pterodactyl
-async function getPlayerListPtero() {
+async function getServerStatusPtero() {
   try {
     // envia o comando list
     await fetch(
