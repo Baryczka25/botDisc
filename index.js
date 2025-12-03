@@ -11,12 +11,13 @@ const {
 } = pkg;
 
 import SFTPClient from "ssh2-sftp-client";
-
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { Octokit } from "@octokit/rest";
+import { queryFull } from "minecraft-server-util";
+
 dotenv.config();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -148,7 +149,9 @@ async function uploadModToSFTP(file) {
   await ensureSFTP();
 
   await sftp.put(tempPath, `${modsPath}/${file.name}`);
-  try { await fs.promises.unlink(tempPath); } catch {}
+  try {
+    await fs.promises.unlink(tempPath);
+  } catch {}
 }
 
 async function removeModSFTP(filename) {
@@ -160,7 +163,6 @@ async function removeModSFTP(filename) {
 
 // ========== PTERODACTYL ==========
 
-// STATUS
 async function getServerStatusPtero() {
   try {
     const res = await fetch(
@@ -189,76 +191,17 @@ async function getServerStatusPtero() {
   }
 }
 
-// 🔥 **FUNÇÃO QUE ESTAVA FALTANDO**
-async function getPlayerListPtero() {
+// ========== QUERY REAL DO MINECRAFT ==========
+async function getPlayerList() {
   try {
-    const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/websocket`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          Accept: "application/json",
-        },
-      }
-    );
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json();
-
-    if (!data?.data?.players) {
-      return { count: 0, names: [] };
-    }
-
+    const data = await queryFull(process.env.SFTP_HOST, Number(process.env.MC_PORT));
     return {
-      count: data.data.players.length,
-      names: data.data.players,
+      count: data.players.length,
+      names: data.players,
     };
   } catch (err) {
+    console.log("Query error:", err.message);
     return { count: 0, names: [] };
-  }
-}
-
-// RESTART
-async function restartServerPtero() {
-  try {
-    const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/power`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ signal: "restart" }),
-      }
-    );
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    return "🔄 Servidor reiniciado!";
-  } catch (err) {
-    return `Erro: ${err.message}`;
-  }
-}
-
-async function sendCommandPtero(command) {
-  try {
-    const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ command }),
-      }
-    );
-
-    return res.ok;
-  } catch {
-    return false;
   }
 }
 
@@ -267,7 +210,7 @@ const pendingApprovals = new Map();
 
 function isAllowedFilename(s) {
   s = s.toLowerCase();
-  return s.includes("neoforge") && s.includes("1.21.1") || s.includes("21.1.213");
+  return (s.includes("neoforge") && s.includes("1.21.1")) || s.includes("21.1.213");
 }
 
 async function pedirAprovacao(interaction, file) {
@@ -306,7 +249,6 @@ async function pedirAprovacao(interaction, file) {
 // ========== COMANDOS ==========
 client.on("interactionCreate", async (interaction) => {
   try {
-
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
 
@@ -321,26 +263,26 @@ client.on("interactionCreate", async (interaction) => {
             return interaction.editReply(`🔴 **Servidor Offline**\nErro: ${status.error}`);
           }
 
-          const players = await getPlayerListPtero();
+          const players = await getPlayerList();
           const mem = Math.round(status.memory / 1024 / 1024);
 
           return interaction.editReply(
             `🟢 **Online**\n` +
-            `⚙️ CPU: ${status.cpu}%\n` +
-            `💾 Memória: ${mem} MB\n` +
-            `👥 Jogadores: ${players.count}\n` +
-            (players.count ? `📜 Nomes:\n• ${players.names.join("\n• ")}` : "📭 Nenhum jogador online") +
-            `\n📌 Estado: ${status.status}`
+              `⚙️ CPU: ${status.cpu}%\n` +
+              `💾 Memória: ${mem} MB\n` +
+              `👥 Jogadores: ${players.count}\n` +
+              (players.count
+                ? `📜 Nomes:\n• ${players.names.join("\n• ")}`
+                : "📭 Nenhum jogador online") +
+              `\n📌 Estado: ${status.status}`
           );
         } catch (err) {
           return interaction.editReply(`❌ Erro interno: ${err.message}`);
         }
       }
 
-      // (todo o resto do SEU código de comandos permanece idêntico)
-
+      // (o resto do seu código permanece igual)
     }
-
   } catch (err) {
     console.error("Interaction handler error:", err);
   }

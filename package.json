@@ -8,6 +8,7 @@
     "adm-zip": "^0.5.16",
     "discord.js": "^14.25.1",
     "dotenv": "^16.6.1",
+    "minecraft-server-util": "^5.4.4",
     "node-fetch": "^3.3.2",
     "node-ssh": "^13.1.0",
     "rcon-client": "^4.2.3",
