@@ -260,7 +260,6 @@ async function getPlayerListPtero() {
         method: "GET",
         headers: {
           Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          "Content-Type": "application/json",
           Accept: "application/json",
         },
       }
@@ -269,32 +268,33 @@ async function getPlayerListPtero() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const json = await res.json();
-    const lines = json.data || [];
+    const lines = json.data?.map(l => l.line) || [];
 
-    // Procurar algo como: "players online: 3" ou lista jog. do mod Fabric/Forge
-    const text = lines.map(l => l.line).join("\n");
+    let joined = [];
+    let left = [];
 
-    // Exemplo clássico do comando list:
-    // "There are 2 of a max of 20 players online: Player1, Player2"
-    const match = text.match(/There are (\d+) of .*? players online: (.*)/i);
+    for (const line of lines) {
+      const j = line.match(/(.+?) joined the game/i);
+      if (j) joined.push(j[1].trim());
 
-    if (!match) {
-      return { count: 0, names: [] };
+      const l = line.match(/(.+?) left the game/i);
+      if (l) left.push(l[1].trim());
     }
 
-    const count = parseInt(match[1], 10);
-    const names = match[2]
-      .split(",")
-      .map(n => n.trim())
-      .filter(n => n.length > 0);
+    const online = joined.filter(p => !left.includes(p));
+    const unique = [...new Set(online)];
 
-    return { count, names };
+    return {
+      count: unique.length,
+      names: unique
+    };
 
   } catch (err) {
     console.error("Erro em getPlayerListPtero:", err);
     return { count: 0, names: [] };
   }
 }
+
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
@@ -550,40 +550,31 @@ client.on("interactionCreate", async (interaction) => {
         }
         return;
       }
-          // --- info ---
+      // --- info ---
       if (name === "info") {
         try {
-          await interaction.deferReply({ ephemeral: true });
+          await interaction.deferReply({ flags: 64 }); // ephemeral substitui por flags
 
           const status = await getServerStatusPtero();
 
           if (!status.online) {
-            return interaction.editReply({
-              content: `🔴 **Servidor Offline**\nErro: ${status.error}`
-            });
+            return interaction.editReply(`🔴 **Servidor Offline**\nErro: ${status.error}`);
           }
 
           const players = await getPlayerListPtero();
           const mem = Math.round(status.memory / 1024 / 1024);
 
-          const text =
+          return interaction.editReply(
             `🟢 **Online**\n` +
             `⚙️ CPU: ${status.cpu}%\n` +
             `💾 Memória: ${mem} MB\n` +
-            `👥 Jogadores: ${players.count}\n` +
-            (players.count > 0
-              ? `📜 **Nomes**:\n• ${players.names.join("\n• ")}`
-              : `📭 Nenhum jogador online`) +
-            `\n📌 Estado: ${status.status}`;
-
-          return interaction.editReply({ content: text });
+            `👥 Jogadores Online: ${players.count}\n` +
+            (players.count > 0 ? `📜 Lista:\n• ${players.names.join("\n• ")}` : "📭 Nenhum jogador online") +
+            `\n📌 Estado: ${status.status}`
+          );
 
         } catch (err) {
-          console.error("Erro no comando /info:", err);
-          // ❗ NUNCA use reply() depois de deferReply()
-          return interaction.editReply({
-            content: `❌ Erro interno: ${err.message}`
-          });
+          return interaction.editReply(`❌ Erro interno: ${err.message}`);
         }
       }
       // --- modpack ---
