@@ -252,6 +252,50 @@ async function sendCommandPtero(command) {
   }
 }
 
+async function getPlayerListPtero() {
+  try {
+    const res = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/console`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      }
+    );
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json();
+    const lines = json.data || [];
+
+    // Procurar algo como: "players online: 3" ou lista jog. do mod Fabric/Forge
+    const text = lines.map(l => l.line).join("\n");
+
+    // Exemplo clássico do comando list:
+    // "There are 2 of a max of 20 players online: Player1, Player2"
+    const match = text.match(/There are (\d+) of .*? players online: (.*)/i);
+
+    if (!match) {
+      return { count: 0, names: [] };
+    }
+
+    const count = parseInt(match[1], 10);
+    const names = match[2]
+      .split(",")
+      .map(n => n.trim())
+      .filter(n => n.length > 0);
+
+    return { count, names };
+
+  } catch (err) {
+    console.error("Erro em getPlayerListPtero:", err);
+    return { count: 0, names: [] };
+  }
+}
+
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
   addHistory("add", fileName, { id: userId, tag: username });
