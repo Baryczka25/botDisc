@@ -589,9 +589,7 @@ client.on("interactionCreate", async (interaction) => {
           return interaction.editReply(
             `🟢 **Online**\n` +
             `⚙️ CPU: ${status.cpu}%\n` +
-            `💾 Memória: ${mem} MB\n` +
-            `👥 Jogadores Online: ${players.count}\n` +
-            (players.count > 0 ? `📜 Lista:\n• ${players.names.join("\n• ")}` : "📭 Nenhum jogador online") +
+            `💾 Memória: ${mem} MB\n`+
             `\n📌 Estado: ${status.status}`
           );
 
