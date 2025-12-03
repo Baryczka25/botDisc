@@ -254,47 +254,69 @@ async function sendCommandPtero(command) {
 
 async function getPlayerListPtero() {
   try {
-    const res = await fetch(
-      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/console`,
+    // 1) envia o comando "list"
+    await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/command`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ command: "list" })
+      }
+    );
+
+    // 2) espera logs atualizarem
+    await new Promise(res => setTimeout(res, 1000));
+
+    // 3) busca os logs
+    const logsRes = await fetch(
+      `${process.env.PTERO_PANEL_URL}/servers/${process.env.PTERO_SERVER_ID}/logs`,
       {
         method: "GET",
         headers: {
           Authorization: `Bearer ${process.env.PTERO_API_KEY}`,
-          Accept: "application/json",
-        },
+          Accept: "application/json"
+        }
       }
     );
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!logsRes.ok) throw new Error(`HTTP ${logsRes.status}`);
 
-    const json = await res.json();
-    const lines = json.data?.map(l => l.line) || [];
+    const json = await logsRes.json();
+    const lines = json?.data?.map(line => line.line) || [];
 
-    let joined = [];
-    let left = [];
+    // 4) procura última linha com "players"
+    const listLine = [...lines].reverse().find(l =>
+      /players online/i.test(l)
+    );
 
-    for (const line of lines) {
-      const j = line.match(/(.+?) joined the game/i);
-      if (j) joined.push(j[1].trim());
-
-      const l = line.match(/(.+?) left the game/i);
-      if (l) left.push(l[1].trim());
+    if (!listLine) {
+      return { count: 0, names: [] };
     }
 
-    const online = joined.filter(p => !left.includes(p));
-    const unique = [...new Set(online)];
+    // 5) extrair nomes
+    const regex = /(\d+).*?online:\s*(.*)/i;
+    const match = listLine.match(regex);
 
-    return {
-      count: unique.length,
-      names: unique
-    };
+    if (!match) {
+      return { count: 0, names: [] };
+    }
+
+    const count = Number(match[1]);
+    const names = match[2]
+      .split(",")
+      .map(n => n.trim())
+      .filter(Boolean);
+
+    return { count, names };
 
   } catch (err) {
-    console.error("Erro em getPlayerListPtero:", err);
-    return { count: 0, names: [] };
+    return { count: 0, names: [], error: err.message };
   }
 }
-
 
 // ========== UPLOADS / APROVAÇÃO ==========
 function registerUpload(userId, username, fileName) {
