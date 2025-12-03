@@ -254,33 +254,37 @@ client.on("interactionCreate", async (interaction) => {
 
       // /info
       if (name === "info") {
-        try {
-          await interaction.deferReply({ ephemeral: true });
+  try {
+    // CORREÇÃO: usar flags ao invés de ephemeral para evitar warning
+    await interaction.deferReply({ flags: 64 });
 
-          const status = await getServerStatusPtero();
+    const status = await getServerStatusPtero();
 
-          if (!status.online) {
-            return interaction.editReply(`🔴 **Servidor Offline**\nErro: ${status.error}`);
-          }
+    if (!status.online) {
+      return interaction.editReply(`🔴 **Servidor Offline**\nErro: ${status.error}`);
+    }
 
-          const players = await getPlayerList();
-          const mem = Math.round(status.memory / 1024 / 1024);
+    const players = await getPlayerListPtero();
+    const mem = Math.round(status.memory / 1024 / 1024);
 
-          return interaction.editReply(
-            `🟢 **Online**\n` +
-              `⚙️ CPU: ${status.cpu}%\n` +
-              `💾 Memória: ${mem} MB\n` +
-              `👥 Jogadores: ${players.count}\n` +
-              (players.count
-                ? `📜 Nomes:\n• ${players.names.join("\n• ")}`
-                : "📭 Nenhum jogador online") +
-              `\n📌 Estado: ${status.status}`
-          );
-        } catch (err) {
-          return interaction.editReply(`❌ Erro interno: ${err.message}`);
-        }
-      }
+    return interaction.editReply(
+      `🟢 **Online**\n` +
+      `⚙️ CPU: ${status.cpu}%\n` +
+      `💾 Memória: ${mem} MB\n` +
+      `👥 Jogadores: ${players.count}\n` +
+      (players.count ? `📜 Nomes:\n• ${players.names.join("\n• ")}` : "📭 Nenhum jogador online") +
+      `\n📌 Estado: ${status.status}`
+    );
 
+  } catch (err) {
+    // Garante que SEMPRE exista um reply válido
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.reply({ content: `❌ Erro interno: ${err.message}`, flags: 64 });
+    } else {
+      await interaction.editReply(`❌ Erro interno: ${err.message}`);
+    }
+  }
+}
       // (o resto do seu código permanece igual)
     }
   } catch (err) {
